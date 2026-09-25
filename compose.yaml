@@ -1,0 +1,15 @@
+services:
+  gateway:
+    build: .
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3080
+      DATABASE_PATH: /app/data/gateway.sqlite
+    ports:
+      - "127.0.0.1:3080:3080"
+    volumes:
+      - jagate-data:/app/data
+    restart: unless-stopped
+volumes:
+  jagate-data:
