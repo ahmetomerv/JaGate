@@ -1,6 +1,7 @@
 CREATE TABLE requests (
   id TEXT PRIMARY KEY,
-  idempotency_key TEXT NOT NULL UNIQUE,
+  client_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
   fingerprint TEXT NOT NULL,
   content_json TEXT NOT NULL,
   action TEXT NOT NULL,
@@ -24,7 +25,8 @@ CREATE TABLE requests (
   next_delivery_at TEXT NOT NULL,
   delivery_error TEXT,
   callback_ref TEXT NOT NULL UNIQUE,
-  delivery_message_id TEXT
+  delivery_message_id TEXT,
+  UNIQUE (client_id, idempotency_key)
 );
 CREATE INDEX requests_delivery ON requests(delivery_status, next_delivery_at);
 CREATE INDEX requests_expiry ON requests(decision_status, expires_at);

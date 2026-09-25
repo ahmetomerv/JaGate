@@ -49,16 +49,21 @@ function button(job: DeliveryJob, updateId: number, decision: 'a' | 'r' = 'a'): 
     from: { id: 7 }, message: { message_id: 101, chat: { id: -100 } } } };
 }
 
-test('configuration binds locally and requires real-looking credentials and numeric IDs', () => {
-  const env = { API_KEY: 'a'.repeat(32), TELEGRAM_BOT_TOKEN: 'test-token-12345',
+test('configuration binds locally and requires distinct client credentials and numeric IDs', () => {
+  const env = { CLIENT_KEYS: `primary:${'a'.repeat(32)},secondary:${'b'.repeat(32)}`, TELEGRAM_BOT_TOKEN: 'test-token-12345',
     TELEGRAM_CHAT_ID: '-100123', TELEGRAM_APPROVER_IDS: '7,8' };
   const config = parseConfig(env);
+  assert.deepEqual([...config.clientKeys], [['primary', 'a'.repeat(32)], ['secondary', 'b'.repeat(32)]]);
   assert.equal(config.HOST, '127.0.0.1');
   assert.equal(config.PORT, 3080);
   assert.equal(config.DATABASE_PATH, './data/gateway.sqlite');
   assert.equal(parseConfig({ ...env, HOST: '0.0.0.0', PORT: '4000' }).PORT, 4000);
   for (const invalid of [
-    { API_KEY: 'short' }, { API_KEY: 'replace-with-a-long-random-secret' },
+    { CLIENT_KEYS: 'primary:short' }, { CLIENT_KEYS: 'primary:replace-with-a-long-random-secret' },
+    { CLIENT_KEYS: `primary:${'a'.repeat(32)},primary:${'b'.repeat(32)}` },
+    { CLIENT_KEYS: `primary:${'a'.repeat(32)},secondary:${'a'.repeat(32)}` },
+    { CLIENT_KEYS: `bad client:${'a'.repeat(32)}` },
+    { CLIENT_KEYS: '' },
     { TELEGRAM_BOT_TOKEN: 'replace-with-dedicated-bot-token' },
     { TELEGRAM_CHAT_ID: 'chat-name' }, { TELEGRAM_APPROVER_IDS: '@alice' },
     { TELEGRAM_APPROVER_IDS: '' }, { PORT: '0' },
@@ -68,7 +73,7 @@ test('configuration binds locally and requires real-looking credentials and nume
 test('migration and canonical idempotency survive restart without changing approved content', () => {
   const { db, path, core, clock } = setup();
   const original = input();
-  const created = core.create(original).request;
+  const created = core.create('primary', original).request;
   const stored = db.prepare('SELECT fingerprint, content_json, claim_token_hash FROM requests WHERE id = ?').get(created.id) as {
     fingerprint: string; content_json: string; claim_token_hash: string | null;
   };
@@ -76,8 +81,8 @@ test('migration and canonical idempotency survive restart without changing appro
   const job = core.dueDeliveries()[0]!;
   core.deliverySucceeded(created.id, '101');
   core.decide(job.callbackRef, '101', '7', 'approved');
-  const claim = core.claim(created.id);
-  const final = core.report(created.id, claim.claimToken, 'failed', 'Maintenance failed');
+  const claim = core.claim('primary', created.id);
+  const final = core.report('primary', created.id, claim.claimToken, 'failed', 'Maintenance failed');
   for (const field of ['action', 'title', 'description', 'details', 'metadata', 'createdAt', 'expiresAt'] as const)
     assert.deepEqual(final[field], created[field]);
   assert.equal(final.status, 'approved');
@@ -91,14 +96,14 @@ test('migration and canonical idempotency survive restart without changing appro
   const restarted = new GatewayCore(reopened, clock);
   assert.equal((reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 1);
   const reordered = { ...original, metadata: { options: { a: 1, b: 2 }, ticket: 'OPS-1' } };
-  assert.equal(restarted.create(reordered).request.id, created.id);
-  assert.throws(() => restarted.create({ ...original, details: [{ label: 'Target', value: 'production' }] }), { code: 'idempotency_conflict' });
-  assert.equal(restarted.get(created.id).executionStatus, 'failed');
+  assert.equal(restarted.create('primary', reordered).request.id, created.id);
+  assert.throws(() => restarted.create('primary', { ...original, details: [{ label: 'Target', value: 'production' }] }), { code: 'idempotency_conflict' });
+  assert.equal(restarted.get('primary', created.id).executionStatus, 'failed');
 });
 
 test('API validates the full request boundary and never echoes rejected values', async () => {
   const { core } = setup();
-  const app = createHttpServer(core, 'a'.repeat(32), () => true);
+  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
   const headers = { authorization: `Bearer ${'a'.repeat(32)}` };
   const base = input();
   const badBodies: Array<[string, unknown]> = [
@@ -133,8 +138,8 @@ test('API validates the full request boundary and never echoes rejected values',
 
 test('all v1 routes require a valid key while health stays public', async () => {
   const { core } = setup();
-  const id = core.create(input()).request.id;
-  const app = createHttpServer(core, 'a'.repeat(32), () => true);
+  const id = core.create('primary', input()).request.id;
+  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
   const routes: Array<['GET' | 'POST', string]> = [
     ['POST', '/v1/requests'], ['GET', `/v1/requests/${id}`],
     ['POST', `/v1/requests/${id}/cancel`], ['POST', `/v1/requests/${id}/claim`],
@@ -144,7 +149,7 @@ test('all v1 routes require a valid key while health stays public', async () => 
     for (const authorization of [undefined, 'Bearer wrong', 'Basic abc']) {
       const response = await app.inject({ method, url, ...(authorization ? { headers: { authorization } } : {}) });
       assert.equal(response.statusCode, 401, `${method} ${url}`);
-      assert.deepEqual(response.json(), { error: { code: 'unauthorized', message: 'valid bearer API key required' } });
+      assert.deepEqual(response.json(), { error: { code: 'unauthorized', message: 'valid client bearer key required' } });
     }
   }
   assert.deepEqual((await app.inject({ method: 'GET', url: '/health' })).json(), { status: 'ok' });
@@ -154,7 +159,7 @@ test('all v1 routes require a valid key while health stays public', async () => 
 
 test('HTTP state errors, cancellation, and result token checks have stable responses', async () => {
   const { core } = setup();
-  const app = createHttpServer(core, 'a'.repeat(32), () => true);
+  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
   const headers = { authorization: `Bearer ${'a'.repeat(32)}` };
   const created = await app.inject({ method: 'POST', url: '/v1/requests', headers, payload: input() });
   const id = created.json().id as string;
@@ -175,30 +180,30 @@ test('HTTP state errors, cancellation, and result token checks have stable respo
 
 test('decision expiry boundary and execution result stay independent', () => {
   const { core, advance } = setup();
-  const before = core.create(input('before-deadline')).request;
+  const before = core.create('primary', input('before-deadline')).request;
   const beforeJob = core.dueDeliveries()[0]!;
   core.deliverySucceeded(before.id, '101');
   advance(899_999);
   assert.equal(core.decide(beforeJob.callbackRef, '101', '7', 'approved').request?.status, 'approved');
   advance(2);
-  const claim = core.claim(before.id);
+  const claim = core.claim('primary', before.id);
   assert.equal(claim.request.status, 'approved');
-  assert.equal(core.report(before.id, claim.claimToken, 'failed', 'Target unavailable').executionStatus, 'failed');
-  assert.equal(core.get(before.id).status, 'approved');
+  assert.equal(core.report('primary', before.id, claim.claimToken, 'failed', 'Target unavailable').executionStatus, 'failed');
+  assert.equal(core.get('primary', before.id).status, 'approved');
 
-  const atDeadline = core.create(input('at-deadline')).request;
+  const atDeadline = core.create('primary', input('at-deadline')).request;
   const expiringJob = core.dueDeliveries()[0]!;
   core.deliverySucceeded(atDeadline.id, '102');
   advance(900_000);
   const late = core.decide(expiringJob.callbackRef, '102', '7', 'approved');
   assert.equal(late.outcome, 'Already expired.');
-  assert.equal(core.get(atDeadline.id).status, 'expired');
-  assert.equal(core.get(atDeadline.id).executionStatus, 'unclaimed');
+  assert.equal(core.get('primary', atDeadline.id).status, 'expired');
+  assert.equal(core.get('primary', atDeadline.id).executionStatus, 'unclaimed');
 });
 
 test('concurrent delivery calls send once and retry schedule survives restart', async () => {
   const { core, db, path, advance, clock } = setup();
-  const request = core.create(input()).request;
+  const request = core.create('primary', input()).request;
   let release!: () => void;
   let sends = 0;
   const transport: TelegramTransport = {
@@ -211,15 +216,15 @@ test('concurrent delivery calls send once and retry schedule survives restart', 
   await gateway.deliverDue();
   assert.equal(sends, 1);
   release(); await first;
-  assert.equal(core.get(request.id).deliveryStatus, 'delivered');
-  assert.equal(core.get(request.id).deliveryAttempts, 1);
+  assert.equal(core.get('primary', request.id).deliveryStatus, 'delivered');
+  assert.equal(core.get('primary', request.id).deliveryAttempts, 1);
 
-  const retry = core.create(input('retry-after-restart')).request;
+  const retry = core.create('primary', input('retry-after-restart')).request;
   core.deliveryFailed(retry.id, true, 'temporary transport error');
   db.close();
   const reopened = openDatabase(path); dbs.push(reopened);
   const restarted = new GatewayCore(reopened, clock);
-  assert.equal(restarted.get(retry.id).deliveryStatus, 'retrying');
+  assert.equal(restarted.get('primary', retry.id).deliveryStatus, 'retrying');
   assert.equal(restarted.dueDeliveries().length, 0);
   advance(2000);
   assert.equal(restarted.dueDeliveries()[0]?.id, retry.id);
@@ -227,7 +232,7 @@ test('concurrent delivery calls send once and retry schedule survives restart', 
 
 test('an unrecorded Telegram send cannot authorize a different message, and expiry stops retries', async () => {
   const { core, advance } = setup();
-  const request = core.create(input()).request;
+  const request = core.create('primary', input()).request;
   const job = core.dueDeliveries()[0]!;
   // Model Telegram accepting message 100, then the transport failing before its ID is committed.
   core.deliveryFailed(request.id, true, 'uncertain send');
@@ -241,21 +246,21 @@ test('an unrecorded Telegram send cannot authorize a different message, and expi
   const duplicate = button(job, 1);
   duplicate.callback_query!.message!.message_id = 100;
   await gateway.process(duplicate);
-  assert.equal(core.get(request.id).status, 'pending');
+  assert.equal(core.get('primary', request.id).status, 'pending');
   assert.match(answers[0]!, /does not belong/);
   await gateway.process(button(job, 2));
-  assert.equal(core.get(request.id).status, 'approved');
+  assert.equal(core.get('primary', request.id).status, 'approved');
 
-  const expiring = core.create(input('retry-expiry')).request;
+  const expiring = core.create('primary', input('retry-expiry')).request;
   core.deliveryFailed(expiring.id, true, 'temporary');
   advance(900_000);
-  assert.equal(core.get(expiring.id).status, 'expired');
+  assert.equal(core.get('primary', expiring.id).status, 'expired');
   assert.deepEqual(core.dueDeliveries(), []);
 });
 
 test('callback acknowledgement and message edit failures do not undo a committed decision', async () => {
   const { core } = setup();
-  const request = core.create(input()).request;
+  const request = core.create('primary', input()).request;
   const job = core.dueDeliveries()[0]!;
   core.deliverySucceeded(request.id, '101');
   const errors: string[] = [];
@@ -265,15 +270,15 @@ test('callback acknowledgement and message edit failures do not undo a committed
     async edit() { throw new Error('Telegram unavailable'); },
   }, '-100', new Set(['7']), (message) => errors.push(message));
   await gateway.process(button(job, 1));
-  assert.equal(core.get(request.id).status, 'approved');
-  assert.equal(core.get(request.id).decidedBy, '7');
+  assert.equal(core.get('primary', request.id).status, 'approved');
+  assert.equal(core.get('primary', request.id).decidedBy, '7');
   assert.deepEqual(errors, ['Could not answer Telegram callback', 'Could not update Telegram decision message']);
-  assert.equal(core.claim(request.id).request.executionStatus, 'claimed');
+  assert.equal(core.claim('primary', request.id).request.executionStatus, 'claimed');
 });
 
 test('malformed and unknown Telegram callbacks leave the request pending', async () => {
   const { core } = setup();
-  const request = core.create(input()).request;
+  const request = core.create('primary', input()).request;
   const job = core.dueDeliveries()[0]!;
   core.deliverySucceeded(request.id, '101');
   const answers: string[] = [];
@@ -285,13 +290,13 @@ test('malformed and unknown Telegram callbacks leave the request pending', async
   await gateway.process({ update_id: 2, callback_query: { id: 'missing-message', data: `a:${job.callbackRef}`, from: { id: 7 } } });
   await gateway.process({ update_id: 3, callback_query: { id: 'malformed', data: 'a:payload-and-secrets', from: { id: 7 }, message: { message_id: 101, chat: { id: -100 } } } });
   await gateway.process({ update_id: 4, callback_query: { id: 'unknown-ref', data: `a:${'z'.repeat(16)}`, from: { id: 7 }, message: { message_id: 101, chat: { id: -100 } } } });
-  assert.equal(core.get(request.id).status, 'pending');
+  assert.equal(core.get('primary', request.id).status, 'pending');
   assert.deepEqual(answers, ['This button is no longer available.', 'This button is no longer available.', 'This button does not belong to an active request message.']);
 });
 
 test('Telegram delivery failure makes readiness false until a retry succeeds', async () => {
   const { core, advance } = setup();
-  const request = core.create(input()).request;
+  const request = core.create('primary', input()).request;
   let attempts = 0;
   const transport: TelegramTransport = {
     async check() {},
@@ -304,18 +309,18 @@ test('Telegram delivery failure makes readiness false until a retry succeeds', a
   try {
     await gateway.start();
     assert.equal(gateway.isReady(), false);
-    assert.equal(core.get(request.id).deliveryStatus, 'retrying');
+    assert.equal(core.get('primary', request.id).deliveryStatus, 'retrying');
     advance(2000);
     await gateway.deliverDue();
     assert.equal(gateway.isReady(), true);
-    assert.equal(core.get(request.id).deliveryStatus, 'delivered');
+    assert.equal(core.get('primary', request.id).deliveryStatus, 'delivered');
   } finally { await gateway.stop(); }
   assert.equal(gateway.isReady(), false);
 });
 
 test('out-of-order Telegram updates settle once and persist offset across restart', async () => {
   const { core, db, path, clock } = setup();
-  const request = core.create(input()).request;
+  const request = core.create('primary', input()).request;
   const job = core.dueDeliveries()[0]!;
   core.deliverySucceeded(request.id, '101');
   const offsets: number[] = [];
@@ -344,7 +349,7 @@ test('out-of-order Telegram updates settle once and persist offset across restar
       };
       check();
     });
-    assert.equal(core.get(request.id).status, 'approved');
+    assert.equal(core.get('primary', request.id).status, 'approved');
     assert.deepEqual(edits, ['approved']);
     assert.deepEqual(answers, ['Approved.', 'Already approved.']);
     assert.deepEqual(offsets.slice(0, 2), [0, 5]);
@@ -356,7 +361,7 @@ test('out-of-order Telegram updates settle once and persist offset across restar
 
 test('client methods complete a failed execution and preserve API errors', async () => {
   const { core } = setup();
-  const app = createHttpServer(core, 'a'.repeat(32), () => true);
+  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
   const client = new ApprovalClient({ baseUrl: 'http://local', apiKey: 'a'.repeat(32), fetch: mockFetch(app), pollIntervalMs: 10 });
   const request = await client.createRequest({ idempotencyKey: 'sdk:one', action: 'maintenance', title: 'Run maintenance',
     description: 'Compact local records', expiresInSeconds: 60 });
@@ -380,4 +385,54 @@ test('client methods complete a failed execution and preserve API errors', async
     description: 'No work required', expiresInSeconds: 60 });
   assert.equal((await client.cancel(cancellable.id)).status, 'cancelled');
   await app.close();
+});
+
+test('two clients share one gateway without sharing requests or idempotency keys', async () => {
+  const { core, db, path, clock } = setup();
+  const keys = new Map([['alpha', 'a'.repeat(32)], ['beta', 'b'.repeat(32)]]);
+  const app = createHttpServer(core, keys, () => true);
+  const fetcher = mockFetch(app);
+  const alpha = new ApprovalClient({ baseUrl: 'http://local', apiKey: keys.get('alpha')!, fetch: fetcher });
+  const beta = new ApprovalClient({ baseUrl: 'http://local', apiKey: keys.get('beta')!, fetch: fetcher });
+  const proposal = { idempotencyKey: 'same-key', action: 'maintenance', title: 'Alpha task',
+    description: 'One client task', expiresInSeconds: 900 };
+  const a = await alpha.createRequest(proposal);
+  const b = await beta.createRequest({ ...proposal, title: 'Beta task' });
+  const forgedOwner = await app.inject({ method: 'POST', url: '/v1/requests',
+    headers: { authorization: `Bearer ${keys.get('alpha')}` }, payload: { ...proposal, clientId: 'beta' } });
+  assert.equal(forgedOwner.statusCode, 400);
+  assert.notEqual(a.id, b.id);
+  assert.equal(a.clientId, 'alpha');
+  assert.equal(b.clientId, 'beta');
+  assert.equal((await alpha.createRequest(proposal)).id, a.id);
+  await assert.rejects(alpha.createRequest({ ...proposal, title: 'Changed task' }), { status: 409, code: 'idempotency_conflict' });
+  for (const operation of [
+    () => beta.getRequest(a.id),
+    () => beta.cancel(a.id),
+    () => beta.claim(a.id),
+    () => beta.reportResult(a.id, { claimToken: 'x'.repeat(43), status: 'succeeded', summary: 'wrong client' }),
+  ]) await assert.rejects(operation(), { status: 404, code: 'not_found' });
+  assert.equal((await alpha.getRequest(a.id)).status, 'pending');
+  const job = core.dueDeliveries().find((due) => due.id === a.id)!;
+  core.deliverySucceeded(a.id, '101');
+  core.decide(job.callbackRef, '101', '7', 'approved');
+  await assert.rejects(beta.claim(a.id), { status: 404, code: 'not_found' });
+  const claim = await alpha.claim(a.id);
+  await assert.rejects(beta.reportResult(a.id, { claimToken: claim.claimToken, status: 'succeeded', summary: 'wrong client' }),
+    { status: 404, code: 'not_found' });
+  assert.equal((await alpha.reportResult(a.id, { claimToken: claim.claimToken, status: 'succeeded', summary: 'done' })).executionStatus, 'succeeded');
+  assert.equal((await beta.cancel(b.id)).status, 'cancelled');
+  await app.close();
+  db.close();
+  const reopened = openDatabase(path); dbs.push(reopened);
+  const afterRestart = new GatewayCore(reopened, clock);
+  assert.equal(afterRestart.get('alpha', a.id).executionStatus, 'succeeded');
+  assert.throws(() => afterRestart.get('beta', a.id), { code: 'not_found' });
+  assert.equal(afterRestart.get('beta', b.id).status, 'cancelled');
+  const rotated = createHttpServer(afterRestart, new Map([['alpha', 'c'.repeat(32)], ['beta', keys.get('beta')!]]), () => true);
+  assert.equal((await rotated.inject({ method: 'GET', url: `/v1/requests/${a.id}`,
+    headers: { authorization: `Bearer ${'c'.repeat(32)}` } })).statusCode, 200);
+  assert.equal((await rotated.inject({ method: 'GET', url: `/v1/requests/${a.id}`,
+    headers: { authorization: `Bearer ${keys.get('alpha')}` } })).statusCode, 401);
+  await rotated.close();
 });

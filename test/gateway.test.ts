@@ -55,45 +55,45 @@ function callback(job: DeliveryJob, user = 7, chat = -100, message = 101, decisi
 
 test('creation is durable, idempotent, immutable and conflict aware', () => {
   const { core, db, path } = setup();
-  const first = core.create(input());
+  const first = core.create('primary', input());
   assert.equal(first.created, true);
-  assert.equal(core.create({ ...input(), metadata: { trace: 'local' } }).request.id, first.request.id);
-  assert.throws(() => core.create({ ...input(), title: 'Changed' }), { code: 'idempotency_conflict' });
+  assert.equal(core.create('primary', { ...input(), metadata: { trace: 'local' } }).request.id, first.request.id);
+  assert.throws(() => core.create('primary', { ...input(), title: 'Changed' }), { code: 'idempotency_conflict' });
   assert.equal(first.request.deliveryStatus, 'pending');
   db.close();
   const reopened = openDatabase(path); dbs.push(reopened);
   const restarted = new GatewayCore(reopened, () => new Date('2026-01-01T12:00:00.000Z'));
-  assert.equal(restarted.get(first.request.id).status, 'pending');
-  assert.equal(restarted.create(input()).request.id, first.request.id);
+  assert.equal(restarted.get('primary', first.request.id).status, 'pending');
+  assert.equal(restarted.create('primary', input()).request.id, first.request.id);
 });
 
 test('expiry closes pending requests and cancellation prevents decision', () => {
   const { core, advance } = setup();
-  const expiring = core.create(input('expire')).request;
+  const expiring = core.create('primary', input('expire')).request;
   advance(900_000);
-  assert.equal(core.get(expiring.id).status, 'expired');
-  assert.throws(() => core.claim(expiring.id), { code: 'not_claimable' });
-  const cancelled = core.create(input('cancel')).request;
-  assert.equal(core.cancel(cancelled.id).status, 'cancelled');
-  assert.throws(() => core.cancel(cancelled.id), { code: 'invalid_state' });
+  assert.equal(core.get('primary', expiring.id).status, 'expired');
+  assert.throws(() => core.claim('primary', expiring.id), { code: 'not_claimable' });
+  const cancelled = core.create('primary', input('cancel')).request;
+  assert.equal(core.cancel('primary', cancelled.id).status, 'cancelled');
+  assert.throws(() => core.cancel('primary', cancelled.id), { code: 'invalid_state' });
 });
 
 test('Telegram authorizes user and chat, binds message, and settles only once', async () => {
   const { core } = setup();
   const fake = new FakeTelegram();
   const gateway = new TelegramGateway(core, fake, '-100', new Set(['7']));
-  const request = core.create(input()).request;
+  const request = core.create('primary', input()).request;
   await gateway.deliverDue();
   const job = fake.sent[0]!;
-  assert.equal(core.get(request.id).deliveryStatus, 'delivered');
+  assert.equal(core.get('primary', request.id).deliveryStatus, 'delivered');
   await gateway.process(callback(job, 8));
   await gateway.process(callback(job, 7, -101));
   await gateway.process(callback(job, 7, -100, 999));
-  assert.equal(core.get(request.id).status, 'pending');
+  assert.equal(core.get('primary', request.id).status, 'pending');
   await gateway.process(callback(job));
   await gateway.process(callback(job, 7, -100, 101, 'r'));
-  assert.equal(core.get(request.id).status, 'approved');
-  assert.equal(core.get(request.id).decidedBy, '7');
+  assert.equal(core.get('primary', request.id).status, 'approved');
+  assert.equal(core.get('primary', request.id).decidedBy, '7');
   assert.deepEqual(fake.edits, ['approved']);
   assert.match(fake.answers.at(-1)!, /Already approved/);
 });
@@ -102,76 +102,76 @@ test('expired and cancelled Telegram buttons cannot decide', async () => {
   const { core, advance } = setup();
   const fake = new FakeTelegram();
   const gateway = new TelegramGateway(core, fake, '-100', new Set(['7']));
-  const expired = core.create(input('expired-tap')).request;
+  const expired = core.create('primary', input('expired-tap')).request;
   await gateway.deliverDue();
   advance(900_000);
   await gateway.process(callback(fake.sent[0]!));
-  assert.equal(core.get(expired.id).status, 'expired');
-  const cancelled = core.create(input('cancelled-tap')).request;
+  assert.equal(core.get('primary', expired.id).status, 'expired');
+  const cancelled = core.create('primary', input('cancelled-tap')).request;
   await gateway.deliverDue();
-  core.cancel(cancelled.id);
+  core.cancel('primary', cancelled.id);
   await gateway.process(callback(fake.sent[1]!, 7, -100, 102));
-  assert.equal(core.get(cancelled.id).status, 'cancelled');
+  assert.equal(core.get('primary', cancelled.id).status, 'cancelled');
 });
 
 test('rejection prevents a claim and records the deciding user', async () => {
   const { core } = setup();
   const fake = new FakeTelegram();
   const gateway = new TelegramGateway(core, fake, '-100', new Set(['7']));
-  const request = core.create(input()).request;
+  const request = core.create('primary', input()).request;
   await gateway.deliverDue();
   await gateway.process(callback(fake.sent[0]!, 7, -100, 101, 'r'));
-  assert.equal(core.get(request.id).status, 'rejected');
-  assert.equal(core.get(request.id).decidedBy, '7');
-  assert.throws(() => core.claim(request.id), { code: 'not_claimable' });
+  assert.equal(core.get('primary', request.id).status, 'rejected');
+  assert.equal(core.get('primary', request.id).decidedBy, '7');
+  assert.throws(() => core.claim('primary', request.id), { code: 'not_claimable' });
 });
 
 test('claim is atomic, final result requires token, crash leaves unknown outcome claimed', async () => {
   const { core, db, path } = setup();
   const fake = new FakeTelegram();
   const gateway = new TelegramGateway(core, fake, '-100', new Set(['7']));
-  const request = core.create(input()).request;
+  const request = core.create('primary', input()).request;
   await gateway.deliverDue();
   await gateway.process(callback(fake.sent[0]!));
-  const attempts = await Promise.allSettled([Promise.resolve().then(() => core.claim(request.id)), Promise.resolve().then(() => core.claim(request.id))]);
+  const attempts = await Promise.allSettled([Promise.resolve().then(() => core.claim('primary', request.id)), Promise.resolve().then(() => core.claim('primary', request.id))]);
   assert.equal(attempts.filter((x) => x.status === 'fulfilled').length, 1);
   const claim = (attempts.find((x) => x.status === 'fulfilled') as PromiseFulfilledResult<ReturnType<typeof core.claim>>).value;
-  assert.throws(() => core.report(request.id, 'x'.repeat(43), 'succeeded', 'done'), { code: 'invalid_claim_token' });
+  assert.throws(() => core.report('primary', request.id, 'x'.repeat(43), 'succeeded', 'done'), { code: 'invalid_claim_token' });
   db.close();
   const reopened = openDatabase(path); dbs.push(reopened);
   const restarted = new GatewayCore(reopened, () => new Date('2026-01-01T12:00:00.000Z'));
-  assert.equal(restarted.get(request.id).executionStatus, 'claimed');
-  assert.throws(() => restarted.claim(request.id), { code: 'not_claimable' });
-  assert.equal(restarted.report(request.id, claim.claimToken, 'succeeded', 'Local action completed').executionStatus, 'succeeded');
-  assert.throws(() => restarted.report(request.id, claim.claimToken, 'failed', 'again'), { code: 'invalid_state' });
+  assert.equal(restarted.get('primary', request.id).executionStatus, 'claimed');
+  assert.throws(() => restarted.claim('primary', request.id), { code: 'not_claimable' });
+  assert.equal(restarted.report('primary', request.id, claim.claimToken, 'succeeded', 'Local action completed').executionStatus, 'succeeded');
+  assert.throws(() => restarted.report('primary', request.id, claim.claimToken, 'failed', 'again'), { code: 'invalid_state' });
 });
 
 test('transient delivery failure retries without falsely reporting delivered', async () => {
   const { core, advance } = setup();
   const fake = new FakeTelegram(); fake.failures = 1;
   const gateway = new TelegramGateway(core, fake, '-100', new Set(['7']));
-  const request = core.create(input()).request;
+  const request = core.create('primary', input()).request;
   await gateway.deliverDue();
-  assert.equal(core.get(request.id).deliveryStatus, 'retrying');
-  assert.equal(core.get(request.id).deliveryAttempts, 1);
+  assert.equal(core.get('primary', request.id).deliveryStatus, 'retrying');
+  assert.equal(core.get('primary', request.id).deliveryAttempts, 1);
   await gateway.deliverDue(); assert.equal(fake.sent.length, 0);
   advance(2000);
   await gateway.deliverDue();
-  assert.equal(core.get(request.id).deliveryStatus, 'delivered');
-  assert.equal(core.get(request.id).deliveryAttempts, 2);
+  assert.equal(core.get('primary', request.id).deliveryStatus, 'delivered');
+  assert.equal(core.get('primary', request.id).deliveryAttempts, 2);
 });
 
 test('delivery stops after five failures and offset survives restart', async () => {
   const { core, advance, db, path } = setup();
   const fake = new FakeTelegram(); fake.failures = 5;
   const gateway = new TelegramGateway(core, fake, '-100', new Set(['7']));
-  const request = core.create(input()).request;
+  const request = core.create('primary', input()).request;
   for (let attempt = 1; attempt <= 5; attempt++) {
     await gateway.deliverDue();
-    assert.equal(core.get(request.id).deliveryAttempts, attempt);
+    assert.equal(core.get('primary', request.id).deliveryAttempts, attempt);
     advance(2000 * 2 ** (attempt - 1));
   }
-  assert.equal(core.get(request.id).deliveryStatus, 'failed');
+  assert.equal(core.get('primary', request.id).deliveryStatus, 'failed');
   await gateway.deliverDue(); assert.equal(fake.sent.length, 0);
   core.saveOffset(21); core.saveOffset(10);
   db.close();
@@ -181,13 +181,13 @@ test('delivery stops after five failures and offset survives restart', async () 
 
 test('permanent delivery error is final on the first attempt', async () => {
   const { core } = setup();
-  const request = core.create(input()).request;
+  const request = core.create('primary', input()).request;
   const fake = new FakeTelegram();
   fake.send = async () => { throw new TelegramApiError('permanent', 'test'); };
   await new TelegramGateway(core, fake, '-100', new Set(['7'])).deliverDue();
-  assert.equal(core.get(request.id).deliveryStatus, 'failed');
-  assert.equal(core.get(request.id).deliveryAttempts, 1);
-  assert.equal(core.get(request.id).deliveryError, 'test');
+  assert.equal(core.get('primary', request.id).deliveryStatus, 'failed');
+  assert.equal(core.get('primary', request.id).deliveryAttempts, 1);
+  assert.equal(core.get('primary', request.id).deliveryError, 'test');
 });
 
 test('Telegram preflight refuses an existing webhook and poller conflict', async () => {
@@ -207,7 +207,7 @@ test('Telegram preflight refuses an existing webhook and poller conflict', async
 
 test('Telegram text is escaped and metadata is not displayed', () => {
   const { core } = setup();
-  const req = core.create({ ...input(), title: '<deploy>', metadata: { secret: 'not shown' } }).request;
+  const req = core.create('primary', { ...input(), title: '<deploy>', metadata: { secret: 'not shown' } }).request;
   const job = core.dueDeliveries()[0]!;
   const rendered = formatMessage(job);
   assert.match(rendered, /&lt;deploy&gt;/);
@@ -217,7 +217,7 @@ test('Telegram text is escaped and metadata is not displayed', () => {
 
 test('HTTP auth, validation, and concurrent claims', async () => {
   const { core } = setup();
-  const app = createHttpServer(core, 'a'.repeat(32), () => true);
+  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
   const headers = { authorization: `Bearer ${'a'.repeat(32)}` };
   assert.equal((await app.inject({ method: 'GET', url: '/v1/requests/test' })).statusCode, 401);
   assert.equal((await app.inject({ method: 'POST', url: '/v1/requests', headers, payload: { ...input(), expiresInSeconds: 1 } })).json().error.code, 'invalid_input');
@@ -235,8 +235,8 @@ test('HTTP auth, validation, and concurrent claims', async () => {
 
 test('readiness rejects new requests while preserving read access', async () => {
   const { core } = setup();
-  const request = core.create(input()).request;
-  const app = createHttpServer(core, 'a'.repeat(32), () => false);
+  const request = core.create('primary', input()).request;
+  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => false);
   const headers = { authorization: `Bearer ${'a'.repeat(32)}` };
   assert.equal((await app.inject({ method: 'GET', url: '/ready' })).statusCode, 503);
   assert.equal((await app.inject({ method: 'POST', url: '/v1/requests', headers, payload: input('another') })).json().error.code, 'not_ready');
@@ -246,7 +246,7 @@ test('readiness rejects new requests while preserving read access', async () => 
 
 test('SDK waits for decision, distinguishes timeout from expiry, and honors AbortSignal', async () => {
   const { core, advance } = setup();
-  const app = createHttpServer(core, 'a'.repeat(32), () => true);
+  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
   const fetcher: typeof fetch = async (url, init) => {
     const u = new URL(String(url));
     const injected = await app.inject({ method: (init?.method ?? 'GET') as 'GET' | 'POST', url: u.pathname, headers: init?.headers as Record<string, string>, ...(init?.body ? { payload: String(init.body) } : {}) });

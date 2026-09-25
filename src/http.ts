@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError, z } from 'zod';
 import type { GatewayCore } from './core.js';
@@ -12,14 +12,22 @@ const resultSchema = z.object({
   summary: z.string().trim().min(1).max(300).refine((s) => !/[\u0000-\u001f]/.test(s)),
 }).strict();
 
-function authorized(header: string | undefined, expected: string): boolean {
-  if (!header?.startsWith('Bearer ')) return false;
-  const supplied = Buffer.from(header.slice(7));
-  const configured = Buffer.from(expected);
-  return supplied.length === configured.length && timingSafeEqual(supplied, configured);
+declare module 'fastify' {
+  interface FastifyRequest { clientId: string }
 }
 
-export function createHttpServer(core: GatewayCore, apiKey: string, telegramReady: () => boolean): FastifyInstance {
+function clientIdFor(header: string | undefined, clientKeys: ReadonlyMap<string, string>): string | undefined {
+  if (!header?.startsWith('Bearer ') || header.length > 256) return undefined;
+  const supplied = createHash('sha256').update(header.slice(7)).digest();
+  let clientId: string | undefined;
+  for (const [id, key] of clientKeys) {
+    const expected = createHash('sha256').update(key).digest();
+    if (timingSafeEqual(supplied, expected)) clientId = id;
+  }
+  return clientId;
+}
+
+export function createHttpServer(core: GatewayCore, clientKeys: ReadonlyMap<string, string>, telegramReady: () => boolean): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: 12_000 });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof GatewayError) return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
@@ -36,21 +44,24 @@ export function createHttpServer(core: GatewayCore, apiKey: string, telegramRead
     return reply.code(storage && telegram ? 200 : 503).send({ ready: storage && telegram, storage, telegram });
   });
   app.register(async (v1) => {
+    v1.decorateRequest('clientId', '');
     v1.addHook('onRequest', async (request, reply) => {
-      if (!authorized(request.headers.authorization, apiKey)) return reply.code(401).send({ error: { code: 'unauthorized', message: 'valid bearer API key required' } });
+      const clientId = clientIdFor(request.headers.authorization, clientKeys);
+      if (!clientId) return reply.code(401).send({ error: { code: 'unauthorized', message: 'valid client bearer key required' } });
+      request.clientId = clientId;
     });
     v1.post('/requests', async (request, reply) => {
       if (!core.storageReady() || !telegramReady()) throw new GatewayError('not_ready', 503, 'gateway is not ready to accept requests');
-      const { request: created, created: isNew } = core.create(createSchema.parse(request.body));
+      const { request: created, created: isNew } = core.create(request.clientId, createSchema.parse(request.body));
       return reply.code(isNew ? 201 : 200).send(created);
     });
-    v1.get('/requests/:id', async (request) => core.get(idSchema.parse((request.params as { id: string }).id)));
-    v1.post('/requests/:id/cancel', async (request) => core.cancel(idSchema.parse((request.params as { id: string }).id)));
-    v1.post('/requests/:id/claim', async (request) => core.claim(idSchema.parse((request.params as { id: string }).id)));
+    v1.get('/requests/:id', async (request) => core.get(request.clientId, idSchema.parse((request.params as { id: string }).id)));
+    v1.post('/requests/:id/cancel', async (request) => core.cancel(request.clientId, idSchema.parse((request.params as { id: string }).id)));
+    v1.post('/requests/:id/claim', async (request) => core.claim(request.clientId, idSchema.parse((request.params as { id: string }).id)));
     v1.post('/requests/:id/result', async (request) => {
       const id = idSchema.parse((request.params as { id: string }).id);
       const body = resultSchema.parse(request.body);
-      return core.report(id, body.claimToken, body.status, body.summary);
+      return core.report(request.clientId, id, body.claimToken, body.status, body.summary);
     });
   }, { prefix: '/v1' });
   return app;

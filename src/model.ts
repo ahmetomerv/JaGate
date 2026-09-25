@@ -31,6 +31,7 @@ export type DeliveryStatus = 'pending' | 'retrying' | 'delivered' | 'failed';
 export type Detail = { label: string; value: string };
 export type RequestView = {
   id: string;
+  clientId: string;
   action: string;
   title: string;
   description: string;

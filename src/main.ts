@@ -12,7 +12,7 @@ const telegram = new TelegramGateway(core,
   new HttpTelegramTransport(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID),
   config.TELEGRAM_CHAT_ID, new Set(config.TELEGRAM_APPROVER_IDS.split(',')),
   (message) => console.error(message));
-const app = createHttpServer(core, config.API_KEY, () => telegram.isReady());
+const app = createHttpServer(core, config.clientKeys, () => telegram.isReady());
 
 try {
   await telegram.start();

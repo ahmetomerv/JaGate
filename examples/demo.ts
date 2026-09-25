@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ApprovalClient } from '../src/client.js';
 
-const apiKey = process.env.API_KEY;
-if (!apiKey) throw new Error('Set API_KEY in the environment');
+const apiKey = process.env.JAGATE_CLIENT_KEY;
+if (!apiKey) throw new Error('Set JAGATE_CLIENT_KEY in the environment');
 const client = new ApprovalClient({ baseUrl: process.env.GATEWAY_URL ?? 'http://127.0.0.1:3080', apiKey });
 const request = await client.createRequest({
   idempotencyKey: `local-demo:${Date.now()}`,

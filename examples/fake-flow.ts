@@ -7,7 +7,7 @@ import { TelegramGateway, type TelegramTransport, type Update } from '../src/tel
 const db = openDatabase(':memory:');
 const core = new GatewayCore(db);
 const key = 'x'.repeat(32);
-const app = createHttpServer(core, key, () => true);
+const app = createHttpServer(core, new Map([['example', key]]), () => true);
 const sent: DeliveryJob[] = [];
 const transport: TelegramTransport = {
   async check() {},

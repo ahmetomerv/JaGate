@@ -6,7 +6,7 @@ import type { DeliveryJob } from '../src/core.js';
 const job: DeliveryJob = {
   id: '123e4567-e89b-42d3-a456-426614174000', callbackRef: 'AbCdEf0123456789', attempts: 0,
   view: {
-    id: '123e4567-e89b-42d3-a456-426614174000', action: 'publish', title: '<Publish & review>',
+    id: '123e4567-e89b-42d3-a456-426614174000', clientId: 'publisher', action: 'publish', title: '<Publish & review>',
     description: 'Publish <draft> after review', details: [{ label: 'Owner & team', value: 'A < B' }],
     metadata: { privateValue: 'must-not-appear' }, createdAt: '2026-09-24T12:00:00.000Z',
     expiresAt: '2026-09-24T12:15:00.000Z', status: 'pending', decidedBy: null, decidedAt: null,
@@ -41,6 +41,7 @@ test('Telegram adapter sends escaped content with opaque callbacks and removes b
   assert.match(text, /&lt;Publish &amp; review&gt;/);
   assert.match(text, /Publish &lt;draft&gt; after review/);
   assert.match(text, /Owner &amp; team/);
+  assert.match(text, /Client: <code>publisher<\/code>/);
   assert.match(text, /A &lt; B/);
   assert.match(text, /123e4567/);
   assert.match(text, /2026-09-24T12:15:00.000Z/);

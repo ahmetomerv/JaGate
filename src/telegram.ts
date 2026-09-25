@@ -24,7 +24,7 @@ const escapeHtml = (value: string): string => value.replaceAll('&', '&amp;').rep
 export function formatMessage(job: DeliveryJob, status?: string): string {
   const { view } = job;
   const details = view.details.map(({ label, value }) => `<b>${escapeHtml(label)}:</b> ${escapeHtml(value)}`).join('\n');
-  return `<b>${escapeHtml(view.title)}</b>\n${escapeHtml(view.description)}${details ? `\n\n${details}` : ''}\n\nAction: <code>${escapeHtml(view.action)}</code>\nRequest: <code>${view.id.slice(0, 8)}</code>\nExpires: ${escapeHtml(view.expiresAt)}${status ? `\nStatus: <b>${escapeHtml(status)}</b>` : ''}`;
+  return `<b>${escapeHtml(view.title)}</b>\n${escapeHtml(view.description)}${details ? `\n\n${details}` : ''}\n\nClient: <code>${escapeHtml(view.clientId)}</code>\nAction: <code>${escapeHtml(view.action)}</code>\nRequest: <code>${view.id.slice(0, 8)}</code>\nExpires: ${escapeHtml(view.expiresAt)}${status ? `\nStatus: <b>${escapeHtml(status)}</b>` : ''}`;
 }
 
 export class HttpTelegramTransport implements TelegramTransport {
