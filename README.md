@@ -1,5 +1,7 @@
 # JaGate
 
+[Documentation](https://ahmetomerv.github.io/JaGate/) · [Local setup](https://ahmetomerv.github.io/JaGate/guide/getting-started.html) · [HTTP API](https://ahmetomerv.github.io/JaGate/API.html)
+
 A small self-hosted gateway for actions that need a human decision. An application submits a description, an allowlisted person decides in Telegram, and the application reads the decision. The gateway never runs the proposed action. The application keeps its own credentials and performs the action only after it claims an approval.
 
 This first release runs one Node.js 24.21.0 LTS process with SQLite, one Telegram bot, one destination chat, one or more named API clients, and one or more numeric approver user IDs. Any language can use the HTTP API. A TypeScript client is included.
@@ -141,4 +143,4 @@ The initial database schema is in `migrations/001_initial.sql` and includes clie
 
 Use it when one or several services need a narrow human approval checkpoint and each can own its own execution logic. A workflow platform is a better fit for many steps, integrations, or a visual editor. A Telegram bot framework is a better fit when you want to build a broader bot conversation. This project is a focused approval coordinator with one channel.
 
-See the [architecture and schema overview](docs/ARCHITECTURE.md), [API reference](docs/API.md), [contribution guide](CONTRIBUTING.md), and [changelog](CHANGELOG.md).
+The [VitePress documentation site](https://ahmetomerv.github.io/JaGate/) contains the local and Docker guides, configuration, TypeScript client usage, API reference, architecture, and security guidance. Its source is in [`docs/`](docs/). GitHub Actions verifies and publishes the site on every successful push to `main` after GitHub Pages is set to use **GitHub Actions** as its source. See the [contribution guide](CONTRIBUTING.md) and [changelog](CHANGELOG.md).

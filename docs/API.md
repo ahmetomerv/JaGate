@@ -2,9 +2,18 @@
 
 Base URL: `http://127.0.0.1:3080` by default. All `/v1` routes require `Authorization: Bearer <CLIENT_KEY>`, using the key assigned to one configured client ID. Send JSON with `Content-Type: application/json` for POST. Dates are UTC ISO 8601 strings. `/health` and `/ready` are unauthenticated and contain no secrets. A client ID is derived from the bearer key; callers cannot choose or change it in the request body.
 
+Set `JAGATE_CLIENT_KEY` to **your application's own** key before using the examples. A single gateway can serve multiple clients, but each key sees only its owner's requests. The gateway never executes the action described in a request.
+
 ## Create a request
 
 `POST /v1/requests` returns 201 for a new request and 200 for an exact idempotent repeat by the same client.
+
+```sh
+curl -sS -X POST http://127.0.0.1:3080/v1/requests \
+  -H "Authorization: Bearer $JAGATE_CLIENT_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"idempotencyKey":"deploy:abc123","action":"deploy","title":"Deploy website","description":"Deploy revision abc123 to production","details":[{"label":"Revision","value":"abc123"}],"expiresInSeconds":900,"metadata":{"ticket":"OPS-42"}}'
+```
 
 ```json
 {
@@ -57,6 +66,36 @@ The client ID, action, title, description, details, metadata, creation time, and
 | `POST /v1/requests/:id/claim` | `{}` | 200 claim object; only approved and unclaimed | 409, 404 |
 | `POST /v1/requests/:id/result` | see below | 200 request; only from claimant, once | 403, 409, 404 |
 
+Use the `id` returned by creation. These requests all require the same client's bearer key. The examples below use `REQUEST_ID` as a shell variable:
+
+```sh
+REQUEST_ID='paste-id-from-create-response'
+curl -sS "http://127.0.0.1:3080/v1/requests/$REQUEST_ID" \
+  -H "Authorization: Bearer $JAGATE_CLIENT_KEY"
+```
+
+`GET` returns the complete request object with HTTP 200. It can report a pending decision alongside `deliveryStatus` such as `retrying` or `failed`. A missing or other-client ID returns 404.
+
+To cancel a **still-pending** request, send:
+
+```sh
+curl -sS -X POST "http://127.0.0.1:3080/v1/requests/$REQUEST_ID/cancel" \
+  -H "Authorization: Bearer $JAGATE_CLIENT_KEY" \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+Success returns HTTP 200 with `status: "cancelled"`. A settled or expired request returns 409 `invalid_state`.
+
+After Telegram approval, claim once:
+
+```sh
+curl -sS -X POST "http://127.0.0.1:3080/v1/requests/$REQUEST_ID/claim" \
+  -H "Authorization: Bearer $JAGATE_CLIENT_KEY" \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+Only `approved + unclaimed` can be claimed. Success returns HTTP 200 with the claim ID, one-time claim token, and updated request. A second claim returns 409 `not_claimable`.
+
 Claim response:
 
 ```json
@@ -83,6 +122,17 @@ Result body:
 
 `status` is `succeeded` or `failed`. `summary` is 1–300 characters, one line, and should contain no secrets. A second report fails with 409.
 
+```sh
+CLAIM_TOKEN='paste-token-from-claim-response'
+# Perform the exact approved action in your own app first, then report it:
+curl -sS -X POST "http://127.0.0.1:3080/v1/requests/$REQUEST_ID/result" \
+  -H "Authorization: Bearer $JAGATE_CLIENT_KEY" \
+  -H 'Content-Type: application/json' \
+  -d "{\"claimToken\":\"$CLAIM_TOKEN\",\"status\":\"succeeded\",\"summary\":\"Action completed\"}"
+```
+
+Success returns HTTP 200 with `executionStatus: "succeeded"` or `"failed"`. The gateway records the caller's report; it cannot verify the external action. Keep the claim token private until reporting succeeds.
+
 ## Health and errors
 
 `GET /health` returns 200 `{"status":"ok"}` while the process can respond. `GET /ready` returns 200 if storage and Telegram polling/delivery are ready enough for new requests, otherwise 503, with `{"ready":false,"storage":true,"telegram":false}` style fields. New request creation returns 503 when not ready. Existing requests can still be read and reconciled.
@@ -96,3 +146,5 @@ Errors have a stable envelope:
 Validation errors also include `issues: [{"path":"expiresInSeconds","message":"..."}]`. Codes: `invalid_input` (400), `unauthorized` (401), `invalid_claim_token` (403), `not_found` (404, including requests owned by another client), `idempotency_conflict` / `invalid_state` / `not_claimable` (409), `not_ready` (503), and `internal_error` (500). HTTP request bodies are limited to 12 KB. No error returns a client key, bot token, or claim token.
 
 Delivery values: `pending`, `retrying`, `delivered`, `failed`. `deliveryError` is a sanitized transport error message and never contains caller content or credentials. A final `failed` delivery remains visible; submit a new request with a new idempotency key after fixing Telegram configuration. Retrying a failed request with the same key returns the same failed request, and no second notification is sent.
+
+Decision values are `pending`, `approved`, `rejected`, `expired`, and `cancelled`. Execution values are `unclaimed`, `claimed`, `succeeded`, and `failed`. A claimed request with `resultAt: null` has an unknown external outcome after a crash; it is not made claimable again automatically. See [Security and recovery](/guide/security).

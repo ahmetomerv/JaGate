@@ -9,7 +9,6 @@
   },
   "files": [
     "dist",
-    "docs",
     "README.md",
     "CONTRIBUTING.md",
     "CHANGELOG.md",
@@ -29,7 +28,11 @@
     "test": "node --import tsx --test test/*.test.ts",
     "test:coverage": "node --import tsx --test --experimental-test-coverage test/*.test.ts",
     "demo:fake": "node --import tsx examples/fake-flow.ts",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
+    "verify": "npm run typecheck && npm test && npm run lint && npm run build && npm run docs:build"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",
@@ -42,6 +45,7 @@
     "eslint": "^9.0.0",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.0.0"
+    "typescript-eslint": "^8.0.0",
+    "vitepress": "^1.6.4"
   }
 }

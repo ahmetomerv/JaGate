@@ -37,7 +37,7 @@ The HTTP API is usable from any language. The TypeScript client is a convenience
 
 ## SQLite schema at a glance
 
-The initial schema, including client ownership, is in [`migrations/001_initial.sql`](../migrations/001_initial.sql). There are three tables and no user-account or workflow tables.
+The initial schema, including client ownership, is in [`migrations/001_initial.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/001_initial.sql). There are three tables and no user-account or workflow tables.
 
 | Table | Main fields | Purpose |
 | --- | --- | --- |

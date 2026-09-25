@@ -5,3 +5,5 @@ data/
 *.sqlite
 *.sqlite-*
 coverage/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
