@@ -16,6 +16,8 @@ npm run demo:fake
 
 The fake demo runs the whole create → approve → claim → result lifecycle without a bot token or network request. It is a useful first check before configuring Telegram.
 
+For an interactive way to test idempotency, cancellation, expiry, claims, and client isolation, run `npm run playground` and open `http://127.0.0.1:5173`. See the [Local playground](/guide/playground) guide. Its simulated mode needs no bot or `.env`; Real gateway mode connects to the service started below.
+
 ## 2. Create a bot and find numeric IDs
 
 Create a bot with [BotFather](https://t.me/BotFather). Send the bot a message in a private chat, or add it to a group and send a message there. Before JaGate starts polling, inspect updates using the bot token:
@@ -54,7 +56,7 @@ The values above are examples, not real credentials. `.env` and `data/` are igno
 In terminal 1, from the repository root:
 
 ```sh
-node --env-file=.env dist/src/main.js
+npm run start:local
 ```
 
 You should see `JaGate listening on 127.0.0.1:3080`. In terminal 2, check readiness:

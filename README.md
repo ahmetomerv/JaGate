@@ -40,6 +40,10 @@ Follow the [local setup guide](https://ahmetomerv.github.io/JaGate/guide/getting
 
 `npm run demo:fake` walks through one approval with an in-memory database and a fake Telegram transport.
 
+`npm run playground` opens a local Vue test console for idempotency, cancellation, expiry, claims, client isolation, and real Telegram integration. See the [playground guide](docs/guide/playground.md).
+
+For a configured local gateway, run `npm run build` followed by `npm run start:local`; the latter loads `.env` without changing the production `npm start` command.
+
 ## Contributing
 
 Create a branch, add commits, and [open a pull request](https://github.com/ahmetomerv/JaGate/compare).

@@ -23,16 +23,19 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "node dist/src/main.js",
+    "start:local": "node --env-file=.env dist/src/main.js",
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && cp -R migrations dist/migrations",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "test:coverage": "node --import tsx --test --experimental-test-coverage test/*.test.ts",
     "demo:fake": "node --import tsx examples/fake-flow.ts",
+    "playground": "node --import tsx playground/main.ts",
+    "playground:build": "vite build --config playground/vite.config.ts",
     "lint": "eslint .",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "verify": "npm run typecheck && npm test && npm run lint && npm run build && npm run docs:build"
+    "verify": "npm run typecheck && npm test && npm run lint && npm run build && npm run docs:build && npm run playground:build"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",
@@ -42,10 +45,13 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.0.0",
+    "@vitejs/plugin-vue": "5.2.4",
     "eslint": "^9.0.0",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.0.0",
-    "vitepress": "^1.6.4"
+    "vite": "5.4.21",
+    "vitepress": "^1.6.4",
+    "vue": "3.5.43"
   }
 }
