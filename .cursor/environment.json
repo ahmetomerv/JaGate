@@ -1,0 +1,8 @@
+{
+  "name": "JaGate",
+  "user": "node",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "install": "npm ci --no-audit --no-fund"
+}
