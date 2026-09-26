@@ -25,7 +25,7 @@ export TELEGRAM_BOT_TOKEN='paste-your-dedicated-bot-token'
 curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates"
 ```
 
-Use `message.chat.id` as `TELEGRAM_CHAT_ID`, and each trusted human `message.from.id` as an entry in `TELEGRAM_APPROVER_IDS`. A group ID is usually negative. The bot's own `id`, usernames, `update_id`, and `message_id` are **not** approver IDs. A `my_chat_member` update can also show the group's `chat.id`, but send a normal message to confirm the human `from.id`. Keep the bot token and the update response private.
+Use `message.chat.id` as the route's `chatId`, and each trusted human `message.from.id` as an entry in `approverIds`. A group ID is usually negative. The bot's own `id`, usernames, `update_id`, and `message_id` are **not** approver IDs. A `my_chat_member` update can also show the group's `chat.id`, but send a normal message to confirm the human `from.id`. Keep the bot token and the update response private.
 
 If `chat.type` is `group`, JaGate will send approvals to that group. A Telegram channel is a different chat type; the tested local flow uses a private chat or group.
 
@@ -41,14 +41,13 @@ Edit `.env` with the generated client key, the BotFather token, and your numeric
 ```dotenv
 CLIENT_KEYS=example:paste-generated-64-character-hex-key
 TELEGRAM_BOT_TOKEN=paste-your-dedicated-bot-token
-TELEGRAM_CHAT_ID=-1001234567890
-TELEGRAM_APPROVER_IDS=123456789
+TELEGRAM_ROUTES='{"example":{"chatId":"-1001234567890","approverIds":["123456789"]}}'
 DATABASE_PATH=./data/gateway.sqlite
 HOST=127.0.0.1
 PORT=3080
 ```
 
-The values above are examples, not real credentials. `.env` and `data/` are ignored by Git. `CLIENT_KEYS` assigns the client ID `example` its own bearer key. See [Configuration and clients](/guide/configuration) to add more applications.
+The values above are examples, not real credentials. `.env` and `data/` are ignored by Git. `CLIENT_KEYS` assigns the client ID `example` its own bearer key; `TELEGRAM_ROUTES` sends its requests to that chat and allows only those numeric user IDs to decide. See [Configuration and clients](/guide/configuration) to add more applications and destinations.
 
 ## 4. Start the gateway
 

@@ -24,12 +24,12 @@ test('Telegram adapter sends escaped content with opaque callbacks and removes b
     const result = method === 'getWebhookInfo' ? { url: '' } : method === 'sendMessage' ? { message_id: 321 } : method === 'getUpdates' ? [] : true;
     return Response.json({ ok: true, result });
   };
-  const telegram = new HttpTelegramTransport('test-token-not-real', '-100', fetcher);
-  await telegram.check();
-  const messageId = await telegram.send(job);
+  const telegram = new HttpTelegramTransport('test-token-not-real', fetcher);
+  await telegram.check(new Set(['-100']));
+  const messageId = await telegram.send(job, '-100');
   assert.equal(messageId, '321');
   await telegram.answer('callback-1', 'Approved.');
-  await telegram.edit(job, messageId, 'approved');
+  await telegram.edit(job, '-100', messageId, 'approved');
   const updates = await telegram.poll(42, new AbortController().signal);
   assert.deepEqual(updates, []);
   assert.deepEqual(calls.map((c) => c.method), ['getMe', 'getWebhookInfo', 'getChat', 'getUpdates', 'sendMessage', 'answerCallbackQuery', 'editMessageText', 'getUpdates']);
@@ -60,8 +60,8 @@ test('Telegram adapter sends escaped content with opaque callbacks and removes b
 test('Telegram adapter classifies API and network failures without exposing the bot token', async () => {
   for (const [status, kind] of [[403, 'permanent'], [429, 'transient'], [503, 'transient'], [409, 'conflict']] as const) {
     const fetcher: typeof fetch = async () => Response.json({ ok: false, description: 'sensitive response' }, { status });
-    const transport = new HttpTelegramTransport('private-test-token', '-100', fetcher);
-    await assert.rejects(transport.send(job), (error: unknown) => {
+    const transport = new HttpTelegramTransport('private-test-token', fetcher);
+    await assert.rejects(transport.send(job, '-100'), (error: unknown) => {
       assert.ok(error instanceof TelegramApiError);
       assert.equal(error.kind, kind);
       assert.doesNotMatch(error.message, /private-test-token|sensitive response/);
@@ -69,7 +69,7 @@ test('Telegram adapter classifies API and network failures without exposing the 
     });
   }
   const network: typeof fetch = async () => { throw new Error('network failure with private-test-token'); };
-  await assert.rejects(new HttpTelegramTransport('private-test-token', '-100', network).send(job), (error: unknown) => {
+  await assert.rejects(new HttpTelegramTransport('private-test-token', network).send(job, '-100'), (error: unknown) => {
     assert.ok(error instanceof TelegramApiError);
     assert.equal(error.kind, 'transient');
     assert.doesNotMatch(error.message, /private-test-token/);
@@ -78,10 +78,30 @@ test('Telegram adapter classifies API and network failures without exposing the 
 });
 
 test('Telegram preflight gives a specific error when the configured chat is inaccessible', async () => {
+  const checked: string[] = [];
   const fetcher: typeof fetch = async (url) => {
     const method = String(url).split('/').at(-1);
-    if (method === 'getChat') return Response.json({ ok: false }, { status: 400 });
+    if (method === 'getChat') {
+      checked.push(method);
+      return Response.json({ ok: false }, { status: 400 });
+    }
     return Response.json({ ok: true, result: method === 'getWebhookInfo' ? { url: '' } : {} });
   };
-  await assert.rejects(new HttpTelegramTransport('test-token', '-100', fetcher).check(), /Check the numeric ID and start or add the bot/);
+  await assert.rejects(new HttpTelegramTransport('test-token', fetcher).check(new Set(['-100'])), /Check its numeric ID and add the bot/);
+  assert.deepEqual(checked, ['getChat']);
+});
+
+test('Telegram preflight checks every distinct destination before polling', async () => {
+  const checked: string[] = [];
+  const fetcher: typeof fetch = async (url, init) => {
+    const method = String(url).split('/').at(-1);
+    if (method === 'getChat') {
+      const chatId = String((JSON.parse(String(init?.body)) as { chat_id: string }).chat_id);
+      checked.push(chatId);
+      if (chatId === '-200') return Response.json({ ok: false }, { status: 400 });
+    }
+    return Response.json({ ok: true, result: method === 'getWebhookInfo' ? { url: '' } : [] });
+  };
+  await assert.rejects(new HttpTelegramTransport('test-token', fetcher).check(new Set(['-100', '-200'])), /configured chat -200/);
+  assert.deepEqual(checked, ['-100', '-200']);
 });

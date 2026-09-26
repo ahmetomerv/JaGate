@@ -14,9 +14,9 @@ const transport: TelegramTransport = {
   async send(job) { sent.push(job); return '101'; },
   async poll(): Promise<Update[]> { return []; },
   async answer(_id, message) { console.log(`Bot answer: ${message}`); },
-  async edit(_job, _messageId, status) { console.log(`Bot message updated: ${status}`); },
+  async edit(_job, _chatId, _messageId, status) { console.log(`Bot message updated: ${status}`); },
 };
-const telegram = new TelegramGateway(core, transport, '-100', new Set(['7']));
+const telegram = new TelegramGateway(core, transport, new Map([['example', { chatId: '-100', approverIds: new Set(['7']) }]]));
 const fetcher: typeof fetch = async (url, init) => {
   const path = new URL(String(url)).pathname;
   const result = await app.inject({ method: (init?.method ?? 'GET') as 'GET' | 'POST', url: path,

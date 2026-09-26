@@ -11,7 +11,7 @@ type Row = {
   claim_token_hash: string | null; result_summary: string | null; result_at: string | null;
   delivery_status: RequestView['deliveryStatus']; delivery_attempts: number; next_delivery_at: string;
   delivery_error: string | null;
-  callback_ref: string; delivery_message_id: string | null;
+  callback_ref: string; delivery_message_id: string | null; delivery_chat_id: string | null;
 };
 
 export type DeliveryJob = { id: string; callbackRef: string; view: RequestView; attempts: number };
@@ -82,13 +82,18 @@ export class GatewayCore {
     return this.get(clientId, id);
   }
 
-  decide(ref: string, messageId: string, actorId: string, decision: 'approved' | 'rejected'): { outcome: string; request?: RequestView } {
+  callbackClient(ref: string): string | undefined {
+    return (this.db.prepare('SELECT client_id FROM requests WHERE callback_ref = ?').get(ref) as { client_id: string } | undefined)?.client_id;
+  }
+
+  decide(ref: string, chatId: string, messageId: string, actorId: string, decision: 'approved' | 'rejected'): { outcome: string; request?: RequestView } {
     this.expire();
     const row = this.db.prepare('SELECT * FROM requests WHERE callback_ref = ?').get(ref) as Row | undefined;
-    if (!row || row.delivery_message_id !== messageId) return { outcome: 'This button does not belong to an active request message.' };
+    if (!row || row.delivery_chat_id !== chatId || row.delivery_message_id !== messageId)
+      return { outcome: 'This button does not belong to an active request message.' };
     const changed = this.db.prepare(`UPDATE requests SET decision_status = ?, decided_by = ?, decided_at = ?
-      WHERE id = ? AND decision_status = 'pending' AND expires_at > ? AND delivery_status = 'delivered' AND delivery_message_id = ?`)
-      .run(decision, actorId, this.iso(), row.id, this.iso(), messageId).changes;
+      WHERE id = ? AND decision_status = 'pending' AND expires_at > ? AND delivery_status = 'delivered' AND delivery_chat_id = ? AND delivery_message_id = ?`)
+      .run(decision, actorId, this.iso(), row.id, this.iso(), chatId, messageId).changes;
     const current = this.getInternal(row.id);
     return { outcome: changed ? (decision === 'approved' ? 'Approved.' : 'Rejected.') : `Already ${current.status}.`, request: current };
   }
@@ -125,9 +130,28 @@ export class GatewayCore {
     return rows.map((r) => ({ id: r.id, callbackRef: r.callback_ref, view: this.view(r), attempts: r.delivery_attempts }));
   }
 
-  deliverySucceeded(id: string, messageId: string): void {
-    this.db.prepare(`UPDATE requests SET delivery_status = 'delivered', delivery_attempts = delivery_attempts + 1, delivery_message_id = ?, delivery_error = NULL
-      WHERE id = ? AND delivery_status IN ('pending','retrying')`).run(messageId, id);
+  deliverySucceeded(id: string, chatId: string, messageId: string): void {
+    this.db.prepare(`UPDATE requests SET delivery_status = 'delivered', delivery_attempts = delivery_attempts + 1,
+      delivery_chat_id = ?, delivery_message_id = ?, delivery_error = NULL
+      WHERE id = ? AND delivery_status IN ('pending','retrying')`).run(chatId, messageId, id);
+  }
+
+  requeueMovedDestinations(destinations: ReadonlyMap<string, string>): number {
+    return this.db.transaction(() => {
+      this.expire();
+      const rows = this.db.prepare(`SELECT id, client_id, delivery_chat_id FROM requests
+        WHERE decision_status = 'pending' AND delivery_status = 'delivered'`).all() as Array<{ id: string; client_id: string; delivery_chat_id: string | null }>;
+      let changed = 0;
+      for (const row of rows) {
+        const destination = destinations.get(row.client_id);
+        if (!destination || destination === row.delivery_chat_id) continue;
+        changed += this.db.prepare(`UPDATE requests SET delivery_status = 'pending', delivery_attempts = 0,
+          next_delivery_at = ?, delivery_error = NULL, delivery_chat_id = NULL, delivery_message_id = NULL, callback_ref = ?
+          WHERE id = ? AND decision_status = 'pending' AND delivery_status = 'delivered'`)
+          .run(this.iso(), randomBytes(12).toString('base64url'), row.id).changes;
+      }
+      return changed;
+    })();
   }
 
   deliveryFailed(id: string, retryable: boolean, reason: string): void {

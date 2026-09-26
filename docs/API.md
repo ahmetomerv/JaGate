@@ -4,6 +4,8 @@ Base URL: `http://127.0.0.1:3080` by default. All `/v1` routes require `Authoriz
 
 Set `JAGATE_CLIENT_KEY` to **your application's own** key before using the examples. A single gateway can serve multiple clients, but each key sees only its owner's requests. The gateway never executes the action described in a request.
 
+The server routes each client's approval message to its configured Telegram chat and permits only that client's allowlisted numeric approvers to decide there. HTTP callers cannot choose a chat or approver in a request body. See [Configuration and clients](/guide/configuration).
+
 ## Create a request
 
 `POST /v1/requests` returns 201 for a new request and 200 for an exact idempotent repeat by the same client.
@@ -108,7 +110,7 @@ Claim response:
 
 The `request` property is the complete request object shown above. Store the claim token privately until reporting the result; the gateway stores only its hash and cannot retrieve it later. The claim ID is an audit identifier, not authorization.
 
-Reads, cancellation, claims, and results require the owning client's key. Another valid client key receives the same 404 `not_found` response as for an unknown request ID, including when it has a valid claim token. Claiming still requires `approved + unclaimed`; reporting still requires the one-time claim token. Telegram approvers in the configured chat can decide requests from every client.
+Reads, cancellation, claims, and results require the owning client's key. Another valid client key receives the same 404 `not_found` response as for an unknown request ID, including when it has a valid claim token. Claiming still requires `approved + unclaimed`; reporting still requires the one-time claim token. A Telegram approver can decide a client's request only when allowlisted for that client and tapping its recorded message in that client's configured chat.
 
 Result body:
 

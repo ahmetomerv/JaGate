@@ -6,8 +6,8 @@ JaGate reads configuration from environment variables. The local walkthrough use
 | --- | --- | --- |
 | `CLIENT_KEYS` | Yes | Comma-separated `clientId:key` entries. Each application gets its own key. |
 | `TELEGRAM_BOT_TOKEN` | Yes | Token for a dedicated bot from BotFather. |
-| `TELEGRAM_CHAT_ID` | Yes | Numeric private or group chat ID to receive approval messages. |
-| `TELEGRAM_APPROVER_IDS` | Yes | Comma-separated numeric Telegram user IDs allowed to decide. |
+| `TELEGRAM_ROUTES` | Yes for multiple clients | JSON object keyed by client ID. Each value has a distinct numeric `chatId` string and a nonempty `approverIds` array of numeric user ID strings. |
+| `TELEGRAM_CHAT_ID`, `TELEGRAM_APPROVER_IDS` | Legacy single-client alternative | One numeric destination chat ID and comma-separated numeric approver IDs. Use only when `CLIENT_KEYS` contains exactly one client and `TELEGRAM_ROUTES` is absent. |
 | `DATABASE_PATH` | No | SQLite path; defaults to `./data/gateway.sqlite`. |
 | `HOST` | No | HTTP bind address; defaults to `127.0.0.1`. |
 | `PORT` | No | HTTP port; defaults to `3080`. |
@@ -16,17 +16,18 @@ Generate a separate key for each application with `openssl rand -hex 32`. Client
 
 ```dotenv
 CLIENT_KEYS=website:<first-random-key>,backups:<second-random-key>
+TELEGRAM_ROUTES='{"website":{"chatId":"-100111","approverIds":["123"]},"backups":{"chatId":"-100222","approverIds":["456","123"]}}'
 ```
 
 Give the website app only its `website` key and the backup app only its `backups` key. The HTTP API derives `clientId` from the key; a caller cannot set ownership in the request body. Each client can create and read only its own requests. A client attempting to read, cancel, claim, or report another client's request receives `404 not_found`, even with a valid claim token. Idempotency keys are unique **within one client**, so both apps may use `daily:2026-09-25` independently.
 
-The client ID is displayed in Telegram so an approver knows which application requested a decision. All configured clients share the same destination chat and the same Telegram approver allowlist. A Telegram approver can decide requests from every client. This is client API isolation, not separate approval teams.
+The client ID is displayed in Telegram so an approver knows which application requested a decision. JaGate uses one bot token and long poller for all clients. Add that bot to **each** configured private or group chat. A client's request goes only to its configured chat. A button works only for the allowlisted numeric user IDs for that client, in that chat, and on the message JaGate recorded. The same human can be listed for more than one client. Chat IDs must be distinct so one client's request text is not sent to another client's destination.
 
-You can rotate a key by changing its value while keeping the client ID; requests stay owned by that ID. Restart JaGate to load the new environment. Removing a client ID prevents HTTP access to its existing requests until that ID is configured again. Store client keys, the bot token, and claim tokens outside source control and logs.
+You can rotate a key by changing its value while keeping the client ID; requests stay owned by that ID. Restart JaGate to load the new environment. Removing a client ID prevents HTTP access to its existing requests until that ID is configured again. Pending undelivered requests for a removed client cannot be routed and are marked as failed delivery; buttons on previously delivered requests can no longer decide them. Settle or cancel pending requests before removing a client. Store client keys, the bot token, and claim tokens outside source control and logs.
 
 ## Two-client example
 
-Generate two different keys, put them in `.env` as `CLIENT_KEYS=website:<website-key>,backups:<backups-key>`, and start JaGate. Each application receives only its own key. In a separate terminal, set the keys for this example without committing them to source control:
+Generate two different keys, put them in `.env` as `CLIENT_KEYS=website:<website-key>,backups:<backups-key>`, configure both routes as above, and start JaGate. Each application receives only its own key. In a separate terminal, set the keys for this example without committing them to source control:
 
 ```sh
 export WEBSITE_KEY='paste-website-key-from-your-env'
@@ -52,6 +53,12 @@ curl -i "http://127.0.0.1:3080/v1/requests/$REQUEST_ID" \
   -H "Authorization: Bearer $BACKUPS_KEY"  # 404 not_found
 ```
 
-The backups client can create its own request, even with the same `idempotencyKey`. It cannot claim or report the website request. Both approvals still appear in the one configured Telegram chat, labeled by client ID.
+The backups client can create its own request, even with the same `idempotencyKey`. It cannot claim or report the website request. The website request appears in the `website` chat; the backups request appears in the `backups` chat. Each route's approvers can decide only that client's request.
+
+## Changing a destination or approvers
+
+Edit `TELEGRAM_ROUTES` and restart JaGate. Startup checks that the bot can access every configured chat; it fails with the inaccessible chat ID if any check fails. If a client's destination chat changed, delivered requests that are still pending are requeued and sent to the new chat with new buttons. Old buttons cannot decide them. This can leave a stale message in the old chat; a chat administrator may delete that message if desired. A request that is already approved or rejected keeps its decision and is never redelivered. The approval deadline does not reset.
+
+Changing only a client's approver list takes effect after restart, including for existing pending buttons. Removing an approver revokes their ability to decide those requests. For a single client, the old `TELEGRAM_CHAT_ID` plus `TELEGRAM_APPROVER_IDS` settings still work, but new multi-client installations must use `TELEGRAM_ROUTES`. Do not configure both formats at once. Back up SQLite before upgrading; the new migration safely requeues pending messages whose earlier chat ID was not recorded.
 
 For a different machine to call JaGate, use a private network or an authenticated TLS reverse proxy. Local Node startup binds to loopback, and the supplied Compose file publishes the port only on host loopback. See [Security and recovery](/guide/security).

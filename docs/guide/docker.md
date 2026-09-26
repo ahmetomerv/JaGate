@@ -7,7 +7,7 @@ First follow the bot and numeric ID steps in [Get started locally](/guide/gettin
 ```sh
 cp .env.example .env
 openssl rand -hex 32
-# Edit .env: replace the CLIENT_KEYS placeholder and fill in the bot token and numeric IDs.
+# Edit .env: replace the CLIENT_KEYS placeholder and fill in the bot token and TELEGRAM_ROUTES IDs.
 docker compose up --build -d
 curl -i http://127.0.0.1:3080/ready
 ```

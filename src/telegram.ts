@@ -1,4 +1,5 @@
 import type { GatewayCore, DeliveryJob } from './core.js';
+import type { TelegramRoute } from './config.js';
 
 export type Callback = {
   id: string;
@@ -8,11 +9,11 @@ export type Callback = {
 };
 export type Update = { update_id: number; callback_query?: Callback };
 export type TelegramTransport = {
-  check(): Promise<void>;
-  send(job: DeliveryJob): Promise<string>;
+  check(chatIds: ReadonlySet<string>): Promise<void>;
+  send(job: DeliveryJob, chatId: string): Promise<string>;
   poll(offset: number, signal: AbortSignal): Promise<Update[]>;
   answer(id: string, text: string): Promise<void>;
-  edit(job: DeliveryJob, messageId: string, status: string): Promise<void>;
+  edit(job: DeliveryJob, chatId: string, messageId: string, status: string): Promise<void>;
 };
 
 export class TelegramApiError extends Error {
@@ -28,7 +29,7 @@ export function formatMessage(job: DeliveryJob, status?: string): string {
 }
 
 export class HttpTelegramTransport implements TelegramTransport {
-  constructor(private readonly token: string, private readonly chatId: string, private readonly fetcher: typeof fetch = fetch) {}
+  constructor(private readonly token: string, private readonly fetcher: typeof fetch = fetch) {}
   private async call<T>(method: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     let response: Response;
     try {
@@ -49,15 +50,17 @@ export class HttpTelegramTransport implements TelegramTransport {
     }
     return payload.result as T;
   }
-  async check(): Promise<void> {
+  async check(chatIds: ReadonlySet<string>): Promise<void> {
     await this.call('getMe', {});
     const info = await this.call<{ url?: string }>('getWebhookInfo', {});
     if (info.url) throw new TelegramApiError('webhook', 'Bot has an active webhook. Remove it explicitly or use a dedicated bot token.');
-    try { await this.call('getChat', { chat_id: this.chatId }); }
-    catch (error) {
-      if (error instanceof TelegramApiError && error.kind === 'permanent')
-        throw new TelegramApiError('permanent', 'Bot cannot access TELEGRAM_CHAT_ID. Check the numeric ID and start or add the bot in that chat.');
-      throw error;
+    for (const chatId of chatIds) {
+      try { await this.call('getChat', { chat_id: chatId }); }
+      catch (error) {
+        if (error instanceof TelegramApiError && error.kind === 'permanent')
+          throw new TelegramApiError('permanent', `Bot cannot access configured chat ${chatId}. Check its numeric ID and add the bot to that chat.`);
+        throw error;
+      }
     }
     try { await this.call('getUpdates', { timeout: 0, limit: 1, allowed_updates: ['callback_query'] }); }
     catch (error) {
@@ -65,9 +68,9 @@ export class HttpTelegramTransport implements TelegramTransport {
       throw error;
     }
   }
-  async send(job: DeliveryJob): Promise<string> {
+  async send(job: DeliveryJob, chatId: string): Promise<string> {
     const result = await this.call<{ message_id: number }>('sendMessage', {
-      chat_id: this.chatId, text: formatMessage(job), parse_mode: 'HTML',
+      chat_id: chatId, text: formatMessage(job), parse_mode: 'HTML',
       link_preview_options: { is_disabled: true },
       reply_markup: { inline_keyboard: [[
         { text: 'Approve', callback_data: `a:${job.callbackRef}` },
@@ -80,8 +83,8 @@ export class HttpTelegramTransport implements TelegramTransport {
     return this.call<Update[]>('getUpdates', { offset, timeout: 20, limit: 50, allowed_updates: ['callback_query'] }, signal);
   }
   async answer(id: string, text: string): Promise<void> { await this.call('answerCallbackQuery', { callback_query_id: id, text: text.slice(0, 180) }); }
-  async edit(job: DeliveryJob, messageId: string, status: string): Promise<void> {
-    await this.call('editMessageText', { chat_id: this.chatId, message_id: Number(messageId), text: formatMessage(job, status), parse_mode: 'HTML', reply_markup: { inline_keyboard: [] } });
+  async edit(job: DeliveryJob, chatId: string, messageId: string, status: string): Promise<void> {
+    await this.call('editMessageText', { chat_id: chatId, message_id: Number(messageId), text: formatMessage(job, status), parse_mode: 'HTML', reply_markup: { inline_keyboard: [] } });
   }
 }
 
@@ -94,12 +97,13 @@ export class TelegramGateway {
   private pollTask: Promise<void> | null = null;
   private deliveryTimer: ReturnType<typeof setInterval> | null = null;
   constructor(private readonly core: GatewayCore, private readonly transport: TelegramTransport,
-    private readonly chatId: string, private readonly approvers: ReadonlySet<string>,
+    private readonly routes: ReadonlyMap<string, TelegramRoute>,
     private readonly onError: (message: string) => void = () => {}) {}
 
   isReady(): boolean { return this.pollReady && this.deliveryReady; }
   async start(): Promise<void> {
-    await this.transport.check();
+    await this.transport.check(new Set([...this.routes.values()].map((route) => route.chatId)));
+    this.core.requeueMovedDestinations(new Map([...this.routes].map(([id, route]) => [id, route.chatId])));
     this.stopped = false;
     this.pollReady = true;
     this.deliveryReady = true;
@@ -119,9 +123,15 @@ export class TelegramGateway {
     this.delivering = true;
     try {
       for (const job of this.core.dueDeliveries()) {
+        const route = this.routes.get(job.view.clientId);
+        if (!route) {
+          this.core.deliveryFailed(job.id, false, 'No Telegram route configured for request client');
+          this.onError(`Telegram delivery failed for request ${job.id}: no route for its client`);
+          continue;
+        }
         try {
-          const messageId = await this.transport.send(job);
-          this.core.deliverySucceeded(job.id, messageId);
+          const messageId = await this.transport.send(job, route.chatId);
+          this.core.deliverySucceeded(job.id, route.chatId, messageId);
           this.deliveryReady = true;
         } catch (error) {
           this.deliveryReady = false;
@@ -139,14 +149,16 @@ export class TelegramGateway {
     const answer = async (message: string) => { try { await this.transport.answer(callback.id, message); } catch { this.onError('Could not answer Telegram callback'); } };
     const match = /^([ar]):([A-Za-z0-9_-]{16})$/.exec(callback.data ?? '');
     if (!match || !callback.message) { await answer('This button is no longer available.'); return; }
-    if (String(callback.message.chat.id) !== this.chatId || !this.approvers.has(String(callback.from.id))) {
+    const route = this.routes.get(this.core.callbackClient(match[2]!) ?? '');
+    if (!route) { await answer('This button is no longer available.'); return; }
+    if (String(callback.message.chat.id) !== route.chatId || !route.approverIds.has(String(callback.from.id))) {
       await answer('You are not authorized to decide this request.'); return;
     }
-    const result = this.core.decide(match[2]!, String(callback.message.message_id), String(callback.from.id), match[1] === 'a' ? 'approved' : 'rejected');
+    const result = this.core.decide(match[2]!, route.chatId, String(callback.message.message_id), String(callback.from.id), match[1] === 'a' ? 'approved' : 'rejected');
     await answer(result.outcome);
     if (result.request && (result.outcome === 'Approved.' || result.outcome === 'Rejected.')) {
       const job = { id: result.request.id, callbackRef: match[2]!, view: result.request, attempts: 0 };
-      try { await this.transport.edit(job, String(callback.message.message_id), result.request.status); }
+      try { await this.transport.edit(job, route.chatId, String(callback.message.message_id), result.request.status); }
       catch { this.onError('Could not update Telegram decision message'); }
     }
   }

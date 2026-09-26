@@ -34,6 +34,7 @@ function input(key = 'job:one'): CreateInput {
     description: 'Compact local records', details: [{ label: 'Target', value: 'staging' }],
     expiresInSeconds: 900, metadata: { ticket: 'OPS-1', options: { b: 2, a: 1 } } });
 }
+const routes = () => new Map([['primary', { chatId: '-100', approverIds: new Set(['7']) }]]);
 
 function mockFetch(app: ReturnType<typeof createHttpServer>): typeof fetch {
   return async (url, init) => {
@@ -51,9 +52,11 @@ function button(job: DeliveryJob, updateId: number, decision: 'a' | 'r' = 'a'): 
 
 test('configuration binds locally and requires distinct client credentials and numeric IDs', () => {
   const env = { CLIENT_KEYS: `primary:${'a'.repeat(32)},secondary:${'b'.repeat(32)}`, TELEGRAM_BOT_TOKEN: 'test-token-12345',
-    TELEGRAM_CHAT_ID: '-100123', TELEGRAM_APPROVER_IDS: '7,8' };
+    TELEGRAM_ROUTES: JSON.stringify({ primary: { chatId: '-100123', approverIds: ['7', '8'] }, secondary: { chatId: '-100456', approverIds: ['9'] } }) };
   const config = parseConfig(env);
   assert.deepEqual([...config.clientKeys], [['primary', 'a'.repeat(32)], ['secondary', 'b'.repeat(32)]]);
+  assert.equal(config.routes.get('primary')?.chatId, '-100123');
+  assert.deepEqual([...config.routes.get('secondary')!.approverIds], ['9']);
   assert.equal(config.HOST, '127.0.0.1');
   assert.equal(config.PORT, 3080);
   assert.equal(config.DATABASE_PATH, './data/gateway.sqlite');
@@ -65,9 +68,22 @@ test('configuration binds locally and requires distinct client credentials and n
     { CLIENT_KEYS: `bad client:${'a'.repeat(32)}` },
     { CLIENT_KEYS: '' },
     { TELEGRAM_BOT_TOKEN: 'replace-with-dedicated-bot-token' },
-    { TELEGRAM_CHAT_ID: 'chat-name' }, { TELEGRAM_APPROVER_IDS: '@alice' },
-    { TELEGRAM_APPROVER_IDS: '' }, { PORT: '0' },
+    { TELEGRAM_ROUTES: 'not-json' },
+    { TELEGRAM_ROUTES: JSON.stringify({ primary: { chatId: '-100123', approverIds: ['7'] } }) },
+    { TELEGRAM_ROUTES: JSON.stringify({ primary: { chatId: '-100123', approverIds: ['7'] }, secondary: { chatId: 'chat-name', approverIds: ['9'] } }) },
+    { TELEGRAM_ROUTES: JSON.stringify({ primary: { chatId: '-100123', approverIds: ['7', '7'] }, secondary: { chatId: '-100456', approverIds: ['9'] } }) },
+    { TELEGRAM_ROUTES: JSON.stringify({ primary: { chatId: '-100123', approverIds: ['7'] }, secondary: { chatId: '-100123', approverIds: ['9'] } }) },
+    { TELEGRAM_ROUTES: JSON.stringify({ primary: { chatId: '-0100123', approverIds: ['7'] }, secondary: { chatId: '-100456', approverIds: ['9'] } }) },
+    { TELEGRAM_ROUTES: JSON.stringify({ primary: { chatId: '-100123', approverIds: ['07'] }, secondary: { chatId: '-100456', approverIds: ['9'] } }) },
+    { TELEGRAM_CHAT_ID: '-100123' }, { PORT: '0' },
   ]) assert.throws(() => parseConfig({ ...env, ...invalid }));
+  const single = parseConfig({ CLIENT_KEYS: `primary:${'a'.repeat(32)}`, TELEGRAM_BOT_TOKEN: 'test-token-12345',
+    TELEGRAM_CHAT_ID: '-100123', TELEGRAM_APPROVER_IDS: '7,8' });
+  assert.equal(single.routes.get('primary')?.chatId, '-100123');
+  assert.throws(() => parseConfig({ CLIENT_KEYS: `primary:${'a'.repeat(32)}`, TELEGRAM_BOT_TOKEN: 'test-token-12345',
+    TELEGRAM_CHAT_ID: '-100123', TELEGRAM_APPROVER_IDS: '7,7' }), /must not contain duplicates/);
+  assert.throws(() => parseConfig({ ...env, TELEGRAM_ROUTES: undefined, TELEGRAM_CHAT_ID: '-100123', TELEGRAM_APPROVER_IDS: '7' }),
+    /Multiple clients require TELEGRAM_ROUTES/);
 });
 
 test('migration and canonical idempotency survive restart without changing approved content', () => {
@@ -79,8 +95,8 @@ test('migration and canonical idempotency survive restart without changing appro
   };
   assert.equal(stored.claim_token_hash, null);
   const job = core.dueDeliveries()[0]!;
-  core.deliverySucceeded(created.id, '101');
-  core.decide(job.callbackRef, '101', '7', 'approved');
+  core.deliverySucceeded(created.id, '-100', '101');
+  core.decide(job.callbackRef, '-100', '101', '7', 'approved');
   const claim = core.claim('primary', created.id);
   const final = core.report('primary', created.id, claim.claimToken, 'failed', 'Maintenance failed');
   for (const field of ['action', 'title', 'description', 'details', 'metadata', 'createdAt', 'expiresAt'] as const)
@@ -94,7 +110,7 @@ test('migration and canonical idempotency survive restart without changing appro
   db.close();
   const reopened = openDatabase(path); dbs.push(reopened);
   const restarted = new GatewayCore(reopened, clock);
-  assert.equal((reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 1);
+  assert.equal((reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 2);
   const reordered = { ...original, metadata: { options: { a: 1, b: 2 }, ticket: 'OPS-1' } };
   assert.equal(restarted.create('primary', reordered).request.id, created.id);
   assert.throws(() => restarted.create('primary', { ...original, details: [{ label: 'Target', value: 'production' }] }), { code: 'idempotency_conflict' });
@@ -182,9 +198,9 @@ test('decision expiry boundary and execution result stay independent', () => {
   const { core, advance } = setup();
   const before = core.create('primary', input('before-deadline')).request;
   const beforeJob = core.dueDeliveries()[0]!;
-  core.deliverySucceeded(before.id, '101');
+  core.deliverySucceeded(before.id, '-100', '101');
   advance(899_999);
-  assert.equal(core.decide(beforeJob.callbackRef, '101', '7', 'approved').request?.status, 'approved');
+  assert.equal(core.decide(beforeJob.callbackRef, '-100', '101', '7', 'approved').request?.status, 'approved');
   advance(2);
   const claim = core.claim('primary', before.id);
   assert.equal(claim.request.status, 'approved');
@@ -193,9 +209,9 @@ test('decision expiry boundary and execution result stay independent', () => {
 
   const atDeadline = core.create('primary', input('at-deadline')).request;
   const expiringJob = core.dueDeliveries()[0]!;
-  core.deliverySucceeded(atDeadline.id, '102');
+  core.deliverySucceeded(atDeadline.id, '-100', '102');
   advance(900_000);
-  const late = core.decide(expiringJob.callbackRef, '102', '7', 'approved');
+  const late = core.decide(expiringJob.callbackRef, '-100', '102', '7', 'approved');
   assert.equal(late.outcome, 'Already expired.');
   assert.equal(core.get('primary', atDeadline.id).status, 'expired');
   assert.equal(core.get('primary', atDeadline.id).executionStatus, 'unclaimed');
@@ -211,7 +227,7 @@ test('concurrent delivery calls send once and retry schedule survives restart', 
     async send() { sends++; await new Promise<void>((resolve) => { release = resolve; }); return '101'; },
     async poll() { return []; }, async answer() {}, async edit() {},
   };
-  const gateway = new TelegramGateway(core, transport, '-100', new Set(['7']));
+  const gateway = new TelegramGateway(core, transport, routes());
   const first = gateway.deliverDue();
   await gateway.deliverDue();
   assert.equal(sends, 1);
@@ -237,12 +253,12 @@ test('an unrecorded Telegram send cannot authorize a different message, and expi
   // Model Telegram accepting message 100, then the transport failing before its ID is committed.
   core.deliveryFailed(request.id, true, 'uncertain send');
   advance(2000);
-  core.deliverySucceeded(request.id, '101');
+  core.deliverySucceeded(request.id, '-100', '101');
   const answers: string[] = [];
   const gateway = new TelegramGateway(core, {
     async check() {}, async send() { throw new Error('unexpected send'); }, async poll() { return []; },
     async answer(_id, answer) { answers.push(answer); }, async edit() {},
-  }, '-100', new Set(['7']));
+  }, routes());
   const duplicate = button(job, 1);
   duplicate.callback_query!.message!.message_id = 100;
   await gateway.process(duplicate);
@@ -262,13 +278,13 @@ test('callback acknowledgement and message edit failures do not undo a committed
   const { core } = setup();
   const request = core.create('primary', input()).request;
   const job = core.dueDeliveries()[0]!;
-  core.deliverySucceeded(request.id, '101');
+  core.deliverySucceeded(request.id, '-100', '101');
   const errors: string[] = [];
   const gateway = new TelegramGateway(core, {
     async check() {}, async send() { throw new Error('unexpected send'); }, async poll() { return []; },
     async answer() { throw new Error('Telegram unavailable'); },
     async edit() { throw new Error('Telegram unavailable'); },
-  }, '-100', new Set(['7']), (message) => errors.push(message));
+  }, routes(), (message) => errors.push(message));
   await gateway.process(button(job, 1));
   assert.equal(core.get('primary', request.id).status, 'approved');
   assert.equal(core.get('primary', request.id).decidedBy, '7');
@@ -280,18 +296,18 @@ test('malformed and unknown Telegram callbacks leave the request pending', async
   const { core } = setup();
   const request = core.create('primary', input()).request;
   const job = core.dueDeliveries()[0]!;
-  core.deliverySucceeded(request.id, '101');
+  core.deliverySucceeded(request.id, '-100', '101');
   const answers: string[] = [];
   const gateway = new TelegramGateway(core, {
     async check() {}, async send() { throw new Error('unexpected send'); }, async poll() { return []; },
     async answer(_id, answer) { answers.push(answer); }, async edit() {},
-  }, '-100', new Set(['7']));
+  }, routes());
   await gateway.process({ update_id: 1 });
   await gateway.process({ update_id: 2, callback_query: { id: 'missing-message', data: `a:${job.callbackRef}`, from: { id: 7 } } });
   await gateway.process({ update_id: 3, callback_query: { id: 'malformed', data: 'a:payload-and-secrets', from: { id: 7 }, message: { message_id: 101, chat: { id: -100 } } } });
   await gateway.process({ update_id: 4, callback_query: { id: 'unknown-ref', data: `a:${'z'.repeat(16)}`, from: { id: 7 }, message: { message_id: 101, chat: { id: -100 } } } });
   assert.equal(core.get('primary', request.id).status, 'pending');
-  assert.deepEqual(answers, ['This button is no longer available.', 'This button is no longer available.', 'This button does not belong to an active request message.']);
+  assert.deepEqual(answers, ['This button is no longer available.', 'This button is no longer available.', 'This button is no longer available.']);
 });
 
 test('Telegram delivery failure makes readiness false until a retry succeeds', async () => {
@@ -305,7 +321,7 @@ test('Telegram delivery failure makes readiness false until a retry succeeds', a
       signal.addEventListener('abort', () => reject(new DOMException('stopped', 'AbortError')), { once: true })); },
     async answer() {}, async edit() {},
   };
-  const gateway = new TelegramGateway(core, transport, '-100', new Set(['7']));
+  const gateway = new TelegramGateway(core, transport, routes());
   try {
     await gateway.start();
     assert.equal(gateway.isReady(), false);
@@ -322,7 +338,7 @@ test('out-of-order Telegram updates settle once and persist offset across restar
   const { core, db, path, clock } = setup();
   const request = core.create('primary', input()).request;
   const job = core.dueDeliveries()[0]!;
-  core.deliverySucceeded(request.id, '101');
+  core.deliverySucceeded(request.id, '-100', '101');
   const offsets: number[] = [];
   const answers: string[] = [];
   const edits: string[] = [];
@@ -335,9 +351,9 @@ test('out-of-order Telegram updates settle once and persist offset across restar
       return new Promise<Update[]>((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('stopped', 'AbortError')), { once: true }));
     },
     async answer(_id, message) { answers.push(message); },
-    async edit(_job, _id, status) { edits.push(status); },
+    async edit(_job, _chatId, _id, status) { edits.push(status); },
   };
-  const gateway = new TelegramGateway(core, transport, '-100', new Set(['7']));
+  const gateway = new TelegramGateway(core, transport, routes());
   try {
     await gateway.start();
     await new Promise<void>((resolve, reject) => {
@@ -371,8 +387,8 @@ test('client methods complete a failed execution and preserve API errors', async
   await assert.rejects(client.createRequest({ idempotencyKey: 'sdk:one', action: 'maintenance', title: 'Changed',
     description: 'Compact local records', expiresInSeconds: 60 }), (error: unknown) => error instanceof ApiError && error.status === 409 && error.code === 'idempotency_conflict');
   const job = core.dueDeliveries()[0]!;
-  core.deliverySucceeded(request.id, '101');
-  core.decide(job.callbackRef, '101', '7', 'approved');
+  core.deliverySucceeded(request.id, '-100', '101');
+  core.decide(job.callbackRef, '-100', '101', '7', 'approved');
   assert.equal((await client.waitForDecision(request.id, { timeoutMs: 100 })).status, 'approved');
   const claim = await client.claim(request.id);
   assert.equal(claim.request.executionStatus, 'claimed');
@@ -414,8 +430,8 @@ test('two clients share one gateway without sharing requests or idempotency keys
   ]) await assert.rejects(operation(), { status: 404, code: 'not_found' });
   assert.equal((await alpha.getRequest(a.id)).status, 'pending');
   const job = core.dueDeliveries().find((due) => due.id === a.id)!;
-  core.deliverySucceeded(a.id, '101');
-  core.decide(job.callbackRef, '101', '7', 'approved');
+  core.deliverySucceeded(a.id, '-100', '101');
+  core.decide(job.callbackRef, '-100', '101', '7', 'approved');
   await assert.rejects(beta.claim(a.id), { status: 404, code: 'not_found' });
   const claim = await alpha.claim(a.id);
   await assert.rejects(beta.reportResult(a.id, { claimToken: claim.claimToken, status: 'succeeded', summary: 'wrong client' }),

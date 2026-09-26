@@ -13,7 +13,7 @@ npm run build
 npm install /absolute/path/to/your/checkout
 ```
 
-Point `JAGATE_URL` at a running gateway and provide **that application's own** client key as `JAGATE_CLIENT_KEY`.
+Point `JAGATE_URL` at a running gateway and provide **that application's own** client key as `JAGATE_CLIENT_KEY`. The server uses that key's client ID to select its Telegram destination and approver allowlist; the caller does not specify them in a request.
 
 ```ts
 import { writeFile } from 'node:fs/promises';

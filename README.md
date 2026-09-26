@@ -4,23 +4,23 @@
 
 A small self-hosted gateway for actions that need a human decision. An application submits a description, an allowlisted person decides in Telegram, and the application reads the decision. The gateway never runs the proposed action. The application keeps its own credentials and performs the action only after it claims an approval.
 
-This first release runs one Node.js 24.21.0 LTS process with SQLite, one Telegram bot, one destination chat, one or more named API clients, and one or more numeric approver user IDs. Any language can use the HTTP API. A TypeScript client is included.
+This first release runs one Node.js 24.21.0 LTS process with SQLite and one Telegram bot. Each named API client has its own destination chat and numeric approver allowlist. Any language can use the HTTP API. A TypeScript client is included.
 
 ## Quick start with Docker Compose
 
-1. Create a **dedicated** bot with Telegram's BotFather. Send it a message, or add it to the intended group and send a message there. Before starting this gateway, inspect `getUpdates` using the bot token. Use `message.chat.id` for `TELEGRAM_CHAT_ID` and each trusted `message.from.id` for `TELEGRAM_APPROVER_IDS`. These are numeric IDs; group chat IDs are often negative. Telegram's response may contain private messages, so keep it private.
+1. Create a **dedicated** bot with Telegram's BotFather. Send it a message, or add it to the intended group and send a message there. Before starting this gateway, inspect `getUpdates` using the bot token. Use `message.chat.id` for the client's route `chatId` and each trusted `message.from.id` for its `approverIds`. These are numeric IDs; group chat IDs are often negative. Telegram's response may contain private messages, so keep it private. For multiple clients, add the same bot to each destination chat.
 
    ```sh
    export TELEGRAM_BOT_TOKEN='paste-your-dedicated-bot-token'
    curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates"
    ```
 
-2. Copy the configuration template, generate a client key, and edit `.env`. Replace the placeholder after `example:` in `CLIENT_KEYS` with the generated key. Add the bot token, chat ID, and comma-separated approver IDs. The sample values are placeholders.
+2. Copy the configuration template, generate a client key, and edit `.env`. Replace the placeholder after `example:` in `CLIENT_KEYS` with the generated key. Add the bot token, numeric `chatId`, and numeric `approverIds` in `TELEGRAM_ROUTES`. The sample values are placeholders.
 
    ```sh
    cp .env.example .env
    openssl rand -hex 32
-   # Edit .env and paste the generated key after example: in CLIENT_KEYS.
+   # Edit .env: set CLIENT_KEYS, TELEGRAM_BOT_TOKEN, and TELEGRAM_ROUTES.
    docker compose up --build -d
    curl -sS http://127.0.0.1:3080/ready
    ```
@@ -119,13 +119,15 @@ The caller chooses and stores the action and parameters. The gateway validates a
 
 Decision: `pending → approved | rejected | expired | cancelled`. Only a pending request can be decided or cancelled. Pending requests expire at their deadline, including across restarts. Execution: `unclaimed → claimed → succeeded | failed`, and only an approved request can be claimed. The claim is a conditional SQLite update, so one request produces one successful claim. `claimed` with `resultAt: null` means the outcome is **unknown**, not that the action failed. It is never automatically reset after a crash: the caller may have completed the side effect before crashing. The claimant should retain the returned claim token until it reports a result. If the token or process is lost, an operator must inspect the target system and reconcile there before creating any new request. Use a separate idempotency key at the target system when available. The gateway cannot guarantee exactly once execution of an external side effect.
 
-Telegram delivery is durable and retried for transient failures with backoff (up to five attempts). If the process crashes after Telegram accepts a message but before SQLite records its message ID, a duplicate message can appear after restart; only the message ID recorded in SQLite can decide the request. Polling progress is stored after an update is handled. Buttons on expired or settled requests get a status response. Editing the Telegram message after a decision is best effort; SQLite remains authoritative.
+Telegram delivery is durable and retried for transient failures with backoff (up to five attempts). If the process crashes after Telegram accepts a message but before SQLite records its chat and message IDs, a duplicate message can appear after restart; only the recorded chat and message can decide the request. Polling progress is stored after an update is handled. Buttons on expired or settled requests get a status response. Editing the Telegram message after a decision is best effort; SQLite remains authoritative. Changing a client's destination and restarting JaGate requeues still-pending delivered requests with new buttons in the new chat; old buttons become invalid. Changing only the approver list takes effect for existing pending requests after restart.
 
 ## Deployment and security
 
-The server binds to `127.0.0.1` outside Docker. Compose publishes only on host loopback. To serve other machines, put an authenticated TLS reverse proxy or private network in front of it; do not expose the bare API publicly. Keep client keys, bot token, and claim tokens out of logs and source control. Use a dedicated bot. Give access to the destination chat only to the intended people, and explicitly allowlist their numeric user IDs. All clients still share that one destination chat and approver list; per-client keys isolate HTTP request access, not human approvers or Telegram visibility. The gateway does not execute caller-provided commands, URLs, scripts, or callbacks, and it does not need action credentials.
+The server binds to `127.0.0.1` outside Docker. Compose publishes only on host loopback. To serve other machines, put an authenticated TLS reverse proxy or private network in front of it; do not expose the bare API publicly. Keep client keys, bot token, and claim tokens out of logs and source control. Use a dedicated bot. Give each client a distinct destination chat and explicitly allowlist the numeric user IDs who may decide that client's requests. One bot serves all configured chats. The gateway does not execute caller-provided commands, URLs, scripts, or callbacks, and it does not need action credentials.
 
 `CLIENT_KEYS` uses `clientId:key` entries separated by commas, for example `website:<random-key>,backups:<different-random-key>`. Client IDs are lowercase letters, digits, `_`, or `-`, start with a letter, and are at most 32 characters. Keys are unique, 32–128 URL-safe characters; generate each with `openssl rand -hex 32`. Client IDs are shown to approvers. Give each application only its own key. Changing a client's key while keeping its ID preserves its request access; removing the client ID makes its existing requests inaccessible through HTTP until it is configured again. The old single `API_KEY` setting is no longer accepted on its own.
+
+`TELEGRAM_ROUTES` is a JSON object with exactly one route per client ID. Each route contains a distinct numeric `chatId` string and a nonempty array of numeric `approverIds` strings. For example, `TELEGRAM_ROUTES='{"website":{"chatId":"-100111","approverIds":["123"]},"backups":{"chatId":"-100222","approverIds":["456"]}}'`. The same bot must be in both chats. An approver can be listed for more than one client, but only the listed IDs in each client's chat can decide its requests. See [Configuration and clients](https://ahmetomerv.github.io/JaGate/guide/configuration.html) for setup and route-change behavior.
 
 Compose stores SQLite in the `jagate-data` volume. Back up that volume regularly. This uses SQLite's online backup API while the service is running:
 
@@ -137,7 +139,7 @@ docker compose exec -T gateway rm /app/data/gateway-backup.sqlite
 
 Keep backups private because request text and metadata are stored in SQLite. Test a restore into a separate volume before relying on it. Do not copy only the main database file while WAL writes are active. One gateway process owns the bot token and this database; multiple processes or pollers are unsupported.
 
-The initial database schema is in `migrations/001_initial.sql` and includes client ownership. The migration runner records the version on first startup and is ready for future schema changes. Back up the SQLite database before applying a future upgrade.
+The database schema is in `migrations/001_initial.sql` and `migrations/002_delivery_chat.sql`. The second migration records which chat received each Telegram message so a button cannot be reused in another chat. The migration runner applies unapplied versions at startup. Back up the SQLite database before upgrading.
 
 ## When to use this
 

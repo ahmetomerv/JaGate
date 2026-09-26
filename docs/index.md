@@ -24,7 +24,7 @@ features:
 
 JaGate is a self-hosted approval service for actions such as deploying a site, publishing a post, or starting a maintenance job. Applications in any language use its [HTTP API](/API). Node.js and TypeScript applications can also use the [typed client](/guide/typescript).
 
-The first release runs one Node.js 24 process, one SQLite database, and one Telegram bot connected to one destination chat. Approvers are identified by numeric Telegram user IDs. Read the [trust and recovery guide](/guide/security) before using approvals for consequential actions.
+The first release runs one Node.js 24 process, one SQLite database, and one Telegram bot. Each client has its own destination chat and allowlist of numeric Telegram user IDs. Read the [trust and recovery guide](/guide/security) before using approvals for consequential actions.
 
 ```text
 Client app → JaGate HTTP API → SQLite → Telegram approver

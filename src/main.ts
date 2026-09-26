@@ -9,8 +9,7 @@ const config = parseConfig(process.env);
 const db = openDatabase(config.DATABASE_PATH);
 const core = new GatewayCore(db);
 const telegram = new TelegramGateway(core,
-  new HttpTelegramTransport(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID),
-  config.TELEGRAM_CHAT_ID, new Set(config.TELEGRAM_APPROVER_IDS.split(',')),
+  new HttpTelegramTransport(config.TELEGRAM_BOT_TOKEN), config.routes,
   (message) => console.error(message));
 const app = createHttpServer(core, config.clientKeys, () => telegram.isReady());
 
