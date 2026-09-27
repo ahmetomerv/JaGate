@@ -17,4 +17,6 @@ COPY --from=build /app/dist ./dist
 RUN mkdir -p /app/data && chown -R node:node /app
 USER node
 EXPOSE 3080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || '3080') + '/ready').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
 CMD ["node", "dist/src/main.js"]

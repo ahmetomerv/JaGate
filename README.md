@@ -36,11 +36,11 @@ Client app → performs its own action → reports the result
 
 ## Developing
 
-Follow the [local setup guide](https://ahmetomerv.github.io/JaGate/guide/getting-started.html). Node.js 24.21.0 is required. From the repository root, `npm ci` then `npm run verify` runs typecheck, tests, lint, the server build, and the docs build.
+Follow the [local setup guide](https://ahmetomerv.github.io/JaGate/guide/getting-started.html). Node.js 24.21.0 is required. From the repository root, `npm ci` then `npm run verify` runs typecheck, tests, lint, and the server, docs, and playground builds.
 
 `npm run demo:fake` walks through one approval with an in-memory database and a fake Telegram transport.
 
-`npm run playground` opens a local Vue test console for idempotency, cancellation, expiry, claims, client isolation, and real Telegram integration. See the [playground guide](docs/guide/playground.md).
+`npm run playground` opens a local API client workbench for idempotency, cancellation, expiry, claims, client isolation, and real Telegram integration. See the [playground guide](docs/guide/playground.md).
 
 For a configured local gateway, run `npm run build` followed by `npm run start:local`; the latter loads `.env` without changing the production `npm start` command.
 
@@ -50,9 +50,11 @@ Create a branch, add commits, and [open a pull request](https://github.com/ahmet
 
 Read [`CONTRIBUTING`](CONTRIBUTING.md) for the process, and keep behavior changes reflected in [`docs/`](docs/).
 
+Report security issues privately as described in [`SECURITY.md`](SECURITY.md).
+
 ## Continuous Integration
 
-GitHub Actions verifies the project on pull requests and publishes the documentation site after a successful push to `main`. See the [workflow runs](https://github.com/ahmetomerv/JaGate/actions).
+GitHub Actions verifies code and docs, checks production dependencies and the npm package, and builds the Docker image on pull requests. It publishes the documentation site after a successful push to `main`. See the [workflow runs](https://github.com/ahmetomerv/JaGate/actions).
 
 ## Changelog
 
