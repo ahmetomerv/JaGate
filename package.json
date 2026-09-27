@@ -12,6 +12,7 @@
     "node": ">=24.21.0 <25"
   },
   "files": [
+    "assets",
     "dist",
     "README.md",
     "CONTRIBUTING.md",

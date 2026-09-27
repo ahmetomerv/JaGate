@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="JaGate logo">
+  <rect width="64" height="64" fill="#142C45" />
+  <path
+    d="M12 30L25 43L41 17"
+    stroke="#65BEFF"
+    stroke-width="7.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <circle
+    cx="45"
+    cy="40"
+    r="7.5"
+    stroke="#65BEFF"
+    stroke-width="5"
+  />
+  <path
+    d="M52.5 33V48"
+    stroke="#65BEFF"
+    stroke-width="5"
+    stroke-linecap="round"
+  />
+</svg>

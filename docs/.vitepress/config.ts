@@ -1,13 +1,22 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitepress';
+
+const base = '/JaGate/';
 
 export default defineConfig({
   lang: 'en-US',
   title: 'JaGate',
   description: 'A self-hosted human approval gateway for applications',
-  base: '/JaGate/',
+  base,
+  vite: { publicDir: fileURLToPath(new URL('../../assets/', import.meta.url)) },
+  head: [
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}logo.svg` }],
+    ['meta', { name: 'theme-color', content: '#142C45' }],
+  ],
   lastUpdated: true,
   themeConfig: {
     siteTitle: 'JaGate',
+    logo: '/logo.svg',
     nav: [
       { text: 'Get started', link: '/guide/getting-started' },
       { text: 'API', link: '/API' },

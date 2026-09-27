@@ -4,6 +4,7 @@ import vue from '@vitejs/plugin-vue';
 
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
+  publicDir: fileURLToPath(new URL('../assets/', import.meta.url)),
   plugins: [vue()],
   build: { outDir: '.vite-dist', emptyOutDir: true },
   server: {

@@ -5,6 +5,9 @@ hero:
   name: JaGate
   text: Human approval before your app acts
   tagline: Run one small gateway, send decisions through Telegram, and let each client application perform its own approved action.
+  image:
+    src: /logo.svg
+    alt: JaGate logo
   actions:
     - theme: brand
       text: Get started

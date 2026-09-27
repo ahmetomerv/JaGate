@@ -189,7 +189,7 @@ onMounted(async () => {
 <template>
   <div class="app-shell">
     <header class="app-header">
-      <div class="brand"><span class="brand-mark">J</span><span>JaGate <span class="brand-divider">/</span> Playground</span><span class="dev-badge">LOCAL</span></div>
+      <div class="brand"><img class="brand-mark" src="/logo.svg" alt="" width="28" height="28" /><span>JaGate <span class="brand-divider">/</span> Playground</span><span class="dev-badge">LOCAL</span></div>
       <div class="header-right"><span class="header-caption">Approval API workbench</span><a href="https://github.com/ahmetomerv/JaGate/blob/main/docs/guide/playground.md" target="_blank" rel="noreferrer">Usage guide ↗</a></div>
     </header>
 

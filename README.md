@@ -1,3 +1,5 @@
+<img src="assets/logo.svg" alt="JaGate logo" width="72" height="72" />
+
 # JaGate
 
 Self-hosted human approval gateway
