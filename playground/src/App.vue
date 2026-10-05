@@ -591,15 +591,11 @@ onMounted(async () => {
         <p v-if="simulatedExample" class="context"><strong>{{ simulatedExample.label }}</strong> (<code>{{ clientId }}</code>) is a client: an application or automation that asks JaGate for approval before it can {{ simulatedExample.scenario }}. Each client has its own requests, keys, Telegram chat, and approver. Selecting another client loads its sample request.</p>
         <article>
           <header class="panel-head">
-            <div>
-              <p class="eyebrow">Request builder</p>
-              <h2>{{ endpoint.label }}</h2>
-            </div>
-            <span class="meta">{{ mode === 'simulated' ? 'SIMULATION' : 'LIVE GATEWAY' }}</span>
+            <h1>{{ endpoint.label }}</h1>
           </header>
           <div class="request-line">
             <span class="method" :class="{ post: endpoint.method === 'POST' }">{{ endpoint.method }}</span>
-            <code>{{ mode === 'simulated' ? 'simulated://jagate' : bootstrap?.gatewayUrl }}<strong>{{ requestPath }}</strong></code>
+            <code>{{ mode === 'simulated' ? 'simulated://jagate' : bootstrap?.gatewayUrl }}{{ requestPath }}</code>
             <button type="button" :aria-busy="busy" :disabled="busy || !clientId || (needsRequestId && !requestId) || (needsKeyId && !keyId) || (auth === 'scoped' && !scopedKey)" @click="execute(operation)">{{ busy ? 'Sending…' : 'Send' }}</button>
           </div>
 
@@ -744,7 +740,7 @@ onMounted(async () => {
         </article>
 
         <article v-if="operation === 'events' && eventPage" aria-label="Request timeline">
-          <header class="panel-head"><h3>Request timeline</h3><span class="muted">{{ eventPage.items.length }} shown</span></header>
+          <header class="panel-head"><h1>Request timeline</h1><span class="muted">{{ eventPage.items.length }} shown</span></header>
           <p v-if="!eventPage.items.length" class="hint">No more events for this request.</p>
           <ol v-else class="timeline">
             <li v-for="event in eventPage.items" :key="event.sequence">
@@ -756,7 +752,7 @@ onMounted(async () => {
         </article>
 
         <article v-if="operation === 'list' && listPage" aria-label="Listed requests">
-          <header class="panel-head"><h3>Requests in this page</h3><span class="muted">{{ listPage.items.length }} shown</span></header>
+          <header class="panel-head"><h1>Requests in this page</h1><span class="muted">{{ listPage.items.length }} shown</span></header>
           <p v-if="!listPage.items.length" class="hint">No requests match these filters.</p>
           <button v-for="item in listPage.items" :key="item.id" type="button" class="row-button" @click="selectRequest(item)">
             <span class="row-copy"><strong>{{ item.title }}</strong><small>{{ item.id }} · {{ new Date(item.createdAt).toLocaleString() }}</small><small>Delivery: {{ item.deliveryStatus }} · Execution: {{ item.executionStatus }}<template v-if="item.claimedAt"> · Claimed: {{ new Date(item.claimedAt).toLocaleString() }}</template><template v-if="item.status === 'pending'"> · Expires: {{ new Date(item.expiresAt).toLocaleString() }}</template></small></span>
@@ -766,7 +762,7 @@ onMounted(async () => {
         </article>
 
         <article v-if="operation === 'keyList' && keyPage" aria-label="Listed client keys">
-          <header class="panel-head"><h3>Client keys in this page</h3><span class="muted">{{ keyPage.items.length }} shown</span></header>
+          <header class="panel-head"><h1>Client keys in this page</h1><span class="muted">{{ keyPage.items.length }} shown</span></header>
           <p v-if="!keyPage.items.length" class="hint">No issued keys on this page.</p>
           <button v-for="item in keyPage.items" :key="item.id" type="button" class="row-button" @click="selectClientKey(item)">
             <span class="row-copy"><strong>{{ item.label }}</strong><small>{{ item.id }} · {{ item.scopes.join(', ') }}</small><small>{{ item.expiresAt ? 'Expires: ' + new Date(item.expiresAt).toLocaleString() : 'No expiry' }}</small></span>
@@ -776,7 +772,7 @@ onMounted(async () => {
         </article>
 
         <article v-if="operation === 'audit' && auditPage" aria-label="Audit events">
-          <header class="panel-head"><h3>Client audit events</h3><span class="muted">{{ auditPage.items.length }} shown</span></header>
+          <header class="panel-head"><h1>Client audit events</h1><span class="muted">{{ auditPage.items.length }} shown</span></header>
           <p v-if="!auditPage.items.length" class="hint">No audit events match these filters.</p>
           <div v-for="event in auditPage.items" :key="event.id" class="row-copy">
             <strong>{{ event.type }}</strong>
@@ -788,8 +784,8 @@ onMounted(async () => {
         </article>
 
         <article v-if="mode === 'simulated'">
+          <header class="panel-head"><h1>Simulation controls</h1></header>
           <div class="simulation">
-            <div><strong>Simulation controls</strong><p class="hint">Drive the Telegram decision and time locally.</p></div>
             <div class="actions">
               <label>Decision actor
                 <select v-model="actor" aria-label="Decision actor">
@@ -802,14 +798,14 @@ onMounted(async () => {
               <label>Seconds<input v-model.number="advanceSeconds" type="number" min="1" max="86400" aria-label="Seconds to advance" /></label>
               <button type="button" class="outline" :disabled="busy" @click="advanceTime">Advance clock</button>
             </div>
+            <p class="hint">Drive the Telegram decision and time locally.</p>
           </div>
         </article>
         <article v-else><p class="hint">Approve or reject in your configured Telegram chat, then send <strong>Get request</strong> to refresh its state.</p></article>
 
         <article>
           <header class="response-head">
-            <div><p class="eyebrow">Response</p><h2>Output</h2></div>
-            <div v-if="visibleEntry" class="meta"><strong :class="visibleEntry.status >= 400 ? 'status-bad' : 'status-ok'">HTTP {{ visibleEntry.status }}</strong> {{ visibleEntry.time }}</div>
+            <h2>Output</h2>
           </header>
           <div class="editor-bar">
             <div class="tabs" role="tablist" aria-label="Response view">
@@ -820,7 +816,7 @@ onMounted(async () => {
           </div>
           <div v-if="responseTab === 'body'" class="output">
             <template v-if="visibleEntry">
-              <p class="section-label"><span>{{ visibleEntry.label }}</span><span>JSON</span></p>
+              <p class="section-label"><span>{{ visibleEntry.label }}</span><span><strong :class="visibleEntry.status >= 400 ? 'status-bad' : 'status-ok'">HTTP {{ visibleEntry.status }}</strong> {{ visibleEntry.time }}</span></p>
               <pre><code>{{ JSON.stringify(visibleEntry.body, null, 2) }}</code></pre>
             </template>
             <div v-else class="empty"><strong>Waiting for a request</strong><p>Send the selected request to see its response.<template v-if="entries.length"> Previous responses remain in History.</template></p></div>
