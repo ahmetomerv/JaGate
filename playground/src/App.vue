@@ -501,8 +501,7 @@ onMounted(async () => {
     <div class="topbar">
       <div class="brand">
         <img src="/logo.svg" alt="" width="28" height="28" />
-        JaGate <span>/</span> Playground
-        <span class="local-tag">LOCAL</span>
+        JaGate <span>Playground [local]</span>
       </div>
       <div class="top-links">
         <span class="hide-narrow">Approval API workbench</span>
@@ -784,8 +783,9 @@ onMounted(async () => {
         </article>
 
         <article v-if="mode === 'simulated'">
-          <header class="panel-head"><h1>Simulation controls</h1></header>
+          <header class="panel-head"><h2>Simulation controls</h2></header>
           <div class="simulation">
+            <p class="hint">Drive the Telegram decision and time locally.</p>
             <div class="actions">
               <label>Decision actor
                 <select v-model="actor" aria-label="Decision actor">
@@ -798,7 +798,6 @@ onMounted(async () => {
               <label>Seconds<input v-model.number="advanceSeconds" type="number" min="1" max="86400" aria-label="Seconds to advance" /></label>
               <button type="button" class="outline" :disabled="busy" @click="advanceTime">Advance clock</button>
             </div>
-            <p class="hint">Drive the Telegram decision and time locally.</p>
           </div>
         </article>
         <article v-else><p class="hint">Approve or reject in your configured Telegram chat, then send <strong>Get request</strong> to refresh its state.</p></article>
