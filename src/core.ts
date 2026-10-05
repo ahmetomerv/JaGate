@@ -145,6 +145,8 @@ export class GatewayCore {
     if (options.status) { conditions.push('decision_status = ?'); values.push(options.status); }
     if (options.deliveryStatus) { conditions.push('delivery_status = ?'); values.push(options.deliveryStatus); }
     if (options.executionStatus) { conditions.push('execution_status = ?'); values.push(options.executionStatus); }
+    if (options.claimedBefore) { conditions.push('claimed_at < ?'); values.push(options.claimedBefore); }
+    if (options.expiresBefore) { conditions.push('expires_at < ?'); values.push(options.expiresBefore); }
     if (options.before) {
       conditions.push('(created_at < ? OR (created_at = ? AND id < ?))');
       values.push(options.before.createdAt, options.before.createdAt, options.before.id);

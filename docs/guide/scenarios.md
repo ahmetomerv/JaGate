@@ -108,6 +108,8 @@ A request with `status: "approved"`, `executionStatus: "claimed"`, and `resultAt
 
 Set `JAGATE_URL` and `JAGATE_CLIENT_KEY` as in the HTTP recipe above, using an owner key with `requests:read`. The listing is paginated; follow `nextCursor` with the same filters if needed. Copy an ID from the listing, inspect that request and its timeline, then check the target system using the exact action details recorded on the request:
 
+For a large backlog, add `claimedBefore=<UTC ISO 8601 cutoff>` to the listing to show only claims older than your chosen threshold. Keep that cutoff fixed while paging. The [attention queries](/API#requests-needing-attention) also cover failed delivery and approvals nearing expiry.
+
 ```sh
 curl -sS "$JAGATE_URL/v1/requests?status=approved&executionStatus=claimed&limit=20" \
   -H "Authorization: Bearer $JAGATE_CLIENT_KEY"

@@ -8,13 +8,13 @@ type ClientKeyView = { id: string; clientId: string; label: string; scopes: Clie
 type KeyPage = { items: ClientKeyView[]; nextCursor: string | null };
 type RequestView = {
   id: string; clientId: string; title: string; action: string; status: string; executionStatus: string;
-  deliveryStatus: string; deliveryAttempts: number; createdAt: string; expiresAt: string; resultSummary: string | null;
+  deliveryStatus: string; deliveryAttempts: number; createdAt: string; expiresAt: string; claimedAt: string | null; resultSummary: string | null;
 };
 type ListPage = { items: RequestView[]; nextCursor: string | null };
 type RequestEvent = { sequence: number; type: string; occurredAt: string; actorId: string | null; attempt: number | null };
 type EventPage = { items: RequestEvent[]; nextCursor: string | null };
 type Entry = { time: string; label: string; status: number; body: unknown };
-type Bootstrap = { token: string; simulatedClients: string[]; liveClients: string[]; gatewayUrl: string };
+type Bootstrap = { token: string; simulatedClients: string[]; liveClients: string[]; gatewayUrl: string; simulatedNow: string };
 
 const bootstrap = ref<Bootstrap | null>(null);
 const mode = ref<Mode>('simulated');
@@ -36,6 +36,10 @@ const listPage = ref<ListPage | null>(null);
 const listStatus = ref('');
 const listDeliveryStatus = ref('');
 const listExecutionStatus = ref('');
+const listClaimedBefore = ref('');
+const listExpiresBefore = ref('');
+const attentionMinutes = ref(10);
+const simulatedClockOffset = ref(0);
 const listLimit = ref(20);
 const listCursor = ref('');
 const listCursorStack = ref<string[]>([]);
@@ -91,6 +95,8 @@ const listFilters = computed(() => ({
   ...(listStatus.value ? { status: listStatus.value } : {}),
   ...(listDeliveryStatus.value ? { deliveryStatus: listDeliveryStatus.value } : {}),
   ...(listExecutionStatus.value ? { executionStatus: listExecutionStatus.value } : {}),
+  ...(listClaimedBefore.value ? { claimedBefore: listClaimedBefore.value } : {}),
+  ...(listExpiresBefore.value ? { expiresBefore: listExpiresBefore.value } : {}),
   limit: Number(listLimit.value),
   ...(listCursor.value ? { cursor: listCursor.value } : {}),
 }));
@@ -111,11 +117,26 @@ const previewBody = computed(() => operation.value === 'create' ? {
 } : operation.value === 'keyCreate' ? { label: keyLabel.value, scopes: keyScopes.value }
   : operation.value === 'list' ? listFilters.value : operation.value === 'events' ? eventFilters.value : operation.value === 'keyList' ? keyFilters.value : {});
 
-watch([listStatus, listDeliveryStatus, listExecutionStatus, listLimit, clientId, mode], () => {
+watch([listStatus, listDeliveryStatus, listExecutionStatus, listClaimedBefore, listExpiresBefore, listLimit, clientId, mode], () => {
   listCursor.value = '';
   listCursorStack.value = [];
   listPage.value = null;
 });
+
+function applyAttention(kind: 'all' | 'delivery' | 'claimed' | 'expiry') {
+  const minutes = Number(attentionMinutes.value);
+  if (kind !== 'all' && kind !== 'delivery' && (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)) {
+    error.value = 'Choose a window from 1 to 1440 minutes.';
+    return;
+  }
+  error.value = '';
+  const now = Date.now() + (mode.value === 'simulated' ? simulatedClockOffset.value : 0);
+  listStatus.value = kind === 'delivery' || kind === 'expiry' ? 'pending' : kind === 'claimed' ? 'approved' : '';
+  listDeliveryStatus.value = kind === 'delivery' ? 'failed' : '';
+  listExecutionStatus.value = kind === 'claimed' ? 'claimed' : '';
+  listClaimedBefore.value = kind === 'claimed' ? new Date(now - minutes * 60_000).toISOString() : '';
+  listExpiresBefore.value = kind === 'expiry' ? new Date(now + minutes * 60_000).toISOString() : '';
+}
 watch([clientId, mode], () => {
   clearDisplayedResponse();
   error.value = '';
@@ -364,6 +385,7 @@ async function advanceTime() {
   try {
     busy.value = true;
     const response = await api('/api/advance-time', { seconds: Number(advanceSeconds.value) });
+    if (typeof (response as { now?: unknown }).now === 'string') simulatedClockOffset.value = Date.parse((response as { now: string }).now) - Date.now();
     const current = sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value;
     record(`ADVANCE CLOCK · ${sentClient} · ${sentMode}`, 200, response, current);
     if (!current) return;
@@ -381,6 +403,8 @@ onMounted(async () => {
     const response = await fetch('/api/bootstrap');
     if (!response.ok) throw new Error('Could not start the playground');
     bootstrap.value = await response.json() as Bootstrap;
+    const simulatedNow = Date.parse(bootstrap.value.simulatedNow);
+    simulatedClockOffset.value = Number.isFinite(simulatedNow) ? simulatedNow - Date.now() : 0;
     clientId.value = bootstrap.value.simulatedClients[0] ?? '';
     await refreshHistory();
   } catch (cause) { error.value = cause instanceof Error ? cause.message : 'Could not start the playground'; }
@@ -482,13 +506,25 @@ onMounted(async () => {
             </template>
             <template v-else-if="operation === 'list'">
               <div class="editor-caption"><span>QUERY PARAMETERS</span><span>Only the selected client's requests</span></div>
+              <div class="attention-shortcuts" role="group" aria-label="Requests needing attention">
+                <strong>Requests needing attention</strong>
+                <div class="attention-actions">
+                  <button type="button" class="utility-button" :disabled="busy" @click="applyAttention('delivery')">Failed delivery</button>
+                  <button type="button" class="utility-button" :disabled="busy" @click="applyAttention('claimed')">Old claims</button>
+                  <button type="button" class="utility-button" :disabled="busy" @click="applyAttention('expiry')">Expiring soon</button>
+                  <button type="button" class="utility-button" :disabled="busy" @click="applyAttention('all')">Clear filters</button>
+                </div>
+                <label>Window (minutes)<input v-model.number="attentionMinutes" type="number" min="1" max="1440" /></label>
+              </div>
               <div class="form-grid list-filter-grid">
                 <label>Decision status<select v-model="listStatus"><option value="">Any</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="expired">Expired</option><option value="cancelled">Cancelled</option></select></label>
                 <label>Delivery status<select v-model="listDeliveryStatus"><option value="">Any</option><option value="pending">Pending</option><option value="retrying">Retrying</option><option value="delivered">Delivered</option><option value="failed">Failed</option></select></label>
                 <label>Execution status<select v-model="listExecutionStatus"><option value="">Any</option><option value="unclaimed">Unclaimed</option><option value="claimed">Claimed</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option></select></label>
                 <label>Page size<input v-model.number="listLimit" type="number" min="1" max="100" /></label>
+                <label>Claimed before <span class="label-type">UTC ISO 8601</span><input v-model.trim="listClaimedBefore" type="text" placeholder="2026-10-05T12:00:00.000Z" spellcheck="false" /></label>
+                <label>Expires before <span class="label-type">UTC ISO 8601</span><input v-model.trim="listExpiresBefore" type="text" placeholder="2026-10-05T12:00:00.000Z" spellcheck="false" /></label>
               </div>
-              <p class="help-text">Newest first. Send to load a page, then use Next page when more requests exist.</p>
+              <p class="help-text">Shortcuts set fixed UTC cutoffs using the selected clock. Send to load a page; keep those cutoffs when paging. Old claims need reconciliation before any retry.</p>
             </template>
             <template v-else-if="operation === 'keyCreate'">
               <div class="editor-caption"><span>APPLICATION / JSON</span><span>Bootstrap key required</span></div>
@@ -548,7 +584,7 @@ onMounted(async () => {
           <div class="list-results-heading"><strong>Requests in this page</strong><span>{{ listPage.items.length }} shown</span></div>
           <p v-if="!listPage.items.length" class="list-empty">No requests match these filters.</p>
           <button v-for="item in listPage.items" :key="item.id" class="list-result" @click="selectRequest(item)">
-            <span><strong>{{ item.title }}</strong><small>{{ item.id }} · {{ new Date(item.createdAt).toLocaleString() }}</small></span>
+            <span><strong>{{ item.title }}</strong><small>{{ item.id }} · {{ new Date(item.createdAt).toLocaleString() }}</small><small>Delivery: {{ item.deliveryStatus }} · Execution: {{ item.executionStatus }}<template v-if="item.claimedAt"> · Claimed: {{ new Date(item.claimedAt).toLocaleString() }}</template><template v-if="item.status === 'pending'"> · Expires: {{ new Date(item.expiresAt).toLocaleString() }}</template></small></span>
             <span class="list-result-status">{{ item.status }} <span aria-hidden="true">→</span></span>
           </button>
           <div class="list-pagination"><span>Page {{ listCursorStack.length + 1 }}</span><div class="list-pagination-actions"><button class="utility-button" :disabled="busy || !listCursorStack.length" @click="previousPage">← Previous</button><button class="utility-button" :disabled="busy || !listPage.nextCursor" @click="nextPage">Next →</button></div></div>

@@ -55,6 +55,8 @@ export type ListRequestsQuery = {
   status?: DecisionStatus;
   deliveryStatus?: DeliveryStatus;
   executionStatus?: ExecutionStatus;
+  claimedBefore?: string;
+  expiresBefore?: string;
   limit?: number;
   cursor?: string;
 };

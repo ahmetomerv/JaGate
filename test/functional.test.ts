@@ -322,6 +322,55 @@ test('listing is owner scoped, filtered, ordered, paginated, and reflects expiry
   await app.close();
 });
 
+test('attention filters find unresolved delivery failures, old claims, and pending expiries without changing their state', async () => {
+  const { core, advance } = setup();
+  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)], ['secondary', 'b'.repeat(32)]]), () => true);
+  const primary = { authorization: `Bearer ${'a'.repeat(32)}` };
+  const reader = core.issueClientKey('primary', 'Monitor', ['requests:read']);
+  const read = async (query: string, authorization = primary.authorization) => app.inject({ method: 'GET',
+    url: `/v1/requests?${query}`, headers: { authorization } });
+  const ids = (page: { items: Array<{ id: string }> }) => page.items.map((item) => item.id);
+
+  const failed = core.create('primary', input('attention:delivery')).request;
+  core.deliveryFailed(failed.id, false, 'Telegram refused delivery');
+  const otherFailed = core.create('secondary', input('attention:other')).request;
+  core.deliveryFailed(otherFailed.id, false, 'other client');
+  const first = core.create('primary', input('attention:claim-one')).request;
+  const firstRef = core.dueDeliveries().find((job) => job.id === first.id)!.callbackRef;
+  core.deliverySucceeded(first.id, '-100', '101');
+  core.decide(firstRef, '-100', '101', '7', 'approved');
+  const firstClaim = core.claim('primary', first.id);
+  advance(60_000);
+  const second = core.create('primary', input('attention:claim-two')).request;
+  const secondRef = core.dueDeliveries().find((job) => job.id === second.id)!.callbackRef;
+  core.deliverySucceeded(second.id, '-100', '102');
+  core.decide(secondRef, '-100', '102', '7', 'approved');
+  core.claim('primary', second.id);
+  advance(60_000);
+  const third = core.create('primary', input('attention:claim-three')).request;
+  const thirdRef = core.dueDeliveries().find((job) => job.id === third.id)!.callbackRef;
+  core.deliverySucceeded(third.id, '-100', '103');
+  core.decide(thirdRef, '-100', '103', '7', 'approved');
+  const thirdClaim = core.claim('primary', third.id);
+  core.report('primary', third.id, thirdClaim.claimToken, 'succeeded', 'Done');
+  const cutoff = '2026-09-24T12:01:00.000Z';
+  assert.deepEqual(ids((await read('status=pending&deliveryStatus=failed', `Bearer ${reader.key}`)).json()), [failed.id]);
+  assert.deepEqual(ids((await read(`executionStatus=claimed&claimedBefore=${cutoff}`)).json()), [first.id]);
+  const page = (await read('executionStatus=claimed&claimedBefore=2026-09-24T12:02:00.000Z&limit=1')).json();
+  assert.deepEqual(ids(page), [second.id]);
+  assert.deepEqual(ids((await read(`executionStatus=claimed&claimedBefore=2026-09-24T12:02:00.000Z&limit=1&cursor=${page.nextCursor}`)).json()), [first.id]);
+  assert.deepEqual(ids((await read('status=pending&expiresBefore=2026-09-24T12:15:00.001Z')).json()), [failed.id]);
+  assert.deepEqual(ids((await read('status=pending&expiresBefore=2026-09-24T12:15:00.000Z')).json()), []);
+  assert.deepEqual(ids((await read('status=pending&deliveryStatus=failed', `Bearer ${'b'.repeat(32)}`)).json()), [otherFailed.id]);
+  for (const query of ['claimedBefore=nope', 'expiresBefore=2026-09-24', 'claimedBefore=2026-09-24T12:00:00+02:00',
+    'expiresBefore=2026-02-30T12:00:00.000Z', 'claimedBefore=2026-09-24T12:00:00.0001Z'])
+    assert.equal((await read(query)).statusCode, 400, query);
+  assert.equal(core.get('primary', first.id).executionStatus, 'claimed');
+  assert.equal(core.get('primary', failed.id).deliveryStatus, 'failed');
+  assert.ok(firstClaim.claimToken);
+  await app.close();
+});
+
 test('event timeline records lifecycle transitions once, in order, without credentials or request content', async () => {
   const { core, db, advance } = setup();
   const created = core.create('primary', input('timeline:approved')).request;
@@ -616,6 +665,8 @@ test('client methods complete a failed execution and preserve API errors', async
   const request = await client.createRequest({ idempotencyKey: 'sdk:one', action: 'maintenance', title: 'Run maintenance',
     description: 'Compact local records', expiresInSeconds: 60 });
   assert.deepEqual((await client.listRequests({ status: 'pending', limit: 1 })).items.map((item) => item.id), [request.id]);
+  assert.deepEqual((await client.listRequests({ status: 'pending', expiresBefore: new Date(Date.parse(request.expiresAt) + 1).toISOString() })).items.map((item) => item.id), [request.id]);
+  assert.deepEqual((await client.listRequests({ status: 'pending', expiresBefore: request.expiresAt })).items, []);
   assert.deepEqual(request.details, []);
   assert.deepEqual(request.metadata, {});
   assert.equal((await client.getRequest(request.id)).status, 'pending');

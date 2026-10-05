@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added client-scoped attention filters for claims older than a UTC cutoff and approvals expiring before one, with playground shortcuts for those and failed Telegram delivery.
 - Added scenario guides for deployment approval, backup deletion approval, and reconciliation after a claimed request's caller crashes.
 - Added client-scoped request listing with decision, delivery, and execution status filters and cursor pagination.
 - Added an owner-scoped, paginated event timeline for each request, with atomic records of gateway state changes.

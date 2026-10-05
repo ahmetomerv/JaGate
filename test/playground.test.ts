@@ -70,6 +70,27 @@ test('playground guards commands and exercises HTTP auth, ownership and idempote
   assert.equal((await call(app, session, '/api/execute', command('events', { requestId: id, auth: 'missing' }))).json().status, 401);
 });
 
+test('playground forwards attention cutoffs and exposes its simulated clock for fixed queries', async () => {
+  const { app } = setup();
+  const boot = (await app.inject({ method: 'GET', url: '/api/bootstrap' })).json() as { token: string; simulatedNow: string };
+  assert.ok(Number.isFinite(Date.parse(boot.simulatedNow)));
+  const created = (await call(app, boot.token, '/api/execute', command('create', { payload: input('attention:playground') }))).json();
+  const expiresAt = created.body.expiresAt as string;
+  const before = new Date(Date.parse(expiresAt) + 1).toISOString();
+  const after = (await call(app, boot.token, '/api/execute', command('list', {
+    filters: { status: 'pending', expiresBefore: before },
+  }))).json();
+  assert.deepEqual(after.body.items.map((item: { id: string }) => item.id), [created.body.id]);
+  const excluded = (await call(app, boot.token, '/api/execute', command('list', {
+    filters: { status: 'pending', expiresBefore: expiresAt },
+  }))).json();
+  assert.deepEqual(excluded.body.items, []);
+  const advanced = (await call(app, boot.token, '/api/advance-time', { seconds: 1 })).json();
+  assert.ok(Date.parse(advanced.now) > Date.parse(boot.simulatedNow));
+  const refreshed = (await app.inject({ method: 'GET', url: '/api/bootstrap' })).json();
+  assert.ok(Date.parse(refreshed.simulatedNow) > Date.parse(boot.simulatedNow));
+});
+
 test('simulated decisions honor approvers, claims and one-time results across restart', async () => {
   const { app, path } = setup();
   const session = await token(app);

@@ -105,6 +105,8 @@ The client ID, action, title, description, details, metadata, creation time, and
 | `status` | `pending`, `approved`, `rejected`, `expired`, `cancelled` | any |
 | `deliveryStatus` | `pending`, `retrying`, `delivered`, `failed` | any |
 | `executionStatus` | `unclaimed`, `claimed`, `succeeded`, `failed` | any |
+| `claimedBefore` | UTC ISO 8601 timestamp; `claimedAt` strictly earlier | any |
+| `expiresBefore` | UTC ISO 8601 timestamp; `expiresAt` strictly earlier | any |
 | `limit` | integer from 1 to 100 | 20 |
 | `cursor` | opaque `nextCursor` from the previous page | first page |
 
@@ -115,7 +117,27 @@ curl -sS 'http://127.0.0.1:3080/v1/requests?status=pending&limit=20' \
 
 The response is `{ "items": [/* complete request objects */], "nextCursor": null }`. When `nextCursor` is a string, send it as the `cursor` parameter with the **same filters and limit** to fetch the next page. A null cursor means there are no more matching requests. The cursor marks the last request on the page; newly created requests do not shift later pages. Status can change between page requests, so repeat from the first page when you need a fresh view. An empty result returns `items: []` and `nextCursor: null`. Unknown or invalid query parameters return 400 `invalid_input`.
 
-The TypeScript client exposes `listRequests({ status, deliveryStatus, executionStatus, limit, cursor })` with `ListRequestsQuery` and `ListRequestsPage` types.
+The TypeScript client exposes `listRequests({ status, deliveryStatus, executionStatus, claimedBefore, expiresBefore, limit, cursor })` with `ListRequestsQuery` and `ListRequestsPage` types. Timestamps must have a `Z` suffix and at most three fractional second digits; accepted values are normalized to millisecond precision before comparison. Requests without a claim cannot match `claimedBefore`.
+
+### Requests needing attention
+
+These are ordinary read-only list queries. Use a key with `requests:read` for the relevant client. Set `JAGATE_URL`, `JAGATE_CLIENT_KEY`, and a fixed UTC cutoff before running them:
+
+```sh
+# Pending approvals whose Telegram delivery failed.
+curl -sS "$JAGATE_URL/v1/requests?status=pending&deliveryStatus=failed&limit=20" \
+  -H "Authorization: Bearer $JAGATE_CLIENT_KEY"
+
+# Claims older than the cutoff whose caller has not reported an outcome.
+curl -sS "$JAGATE_URL/v1/requests?status=approved&executionStatus=claimed&claimedBefore=$CUTOFF_UTC&limit=20" \
+  -H "Authorization: Bearer $JAGATE_CLIENT_KEY"
+
+# Pending approvals expiring before the cutoff.
+curl -sS "$JAGATE_URL/v1/requests?status=pending&expiresBefore=$CUTOFF_UTC&limit=20" \
+  -H "Authorization: Bearer $JAGATE_CLIENT_KEY"
+```
+
+For example, set `CUTOFF_UTC=2026-10-05T12:00:00.000Z` (URL-encode it if using a different timestamp format). A delivery failure is terminal for that delivery attempt, but the request remains pending until cancelled or expired. Listing calls expire elapsed pending requests first, so the pending filters exclude already expired requests. Reuse the **same cutoff and filters** with `nextCursor` for later pages; choose a new cutoff and restart from page one for a fresh scan. Inspect a request and its [event timeline](#per-request-event-timeline) before taking action. A claimed request may have already caused an external effect: reconcile that system before reporting or starting a new approval. JaGate does not reset claims or retry actions from these queries.
 
 ## Per-request event timeline
 

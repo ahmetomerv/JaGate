@@ -25,6 +25,8 @@ export class ApprovalClient {
     if (query.status) params.set('status', query.status);
     if (query.deliveryStatus) params.set('deliveryStatus', query.deliveryStatus);
     if (query.executionStatus) params.set('executionStatus', query.executionStatus);
+    if (query.claimedBefore) params.set('claimedBefore', query.claimedBefore);
+    if (query.expiresBefore) params.set('expiresBefore', query.expiresBefore);
     if (query.limit !== undefined) params.set('limit', String(query.limit));
     if (query.cursor) params.set('cursor', query.cursor);
     const search = params.toString();

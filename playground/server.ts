@@ -24,6 +24,8 @@ const commandSchema = z.object({
     status: z.string().max(32).optional(),
     deliveryStatus: z.string().max(32).optional(),
     executionStatus: z.string().max(32).optional(),
+    claimedBefore: z.string().max(64).optional(),
+    expiresBefore: z.string().max(64).optional(),
     limit: z.number().int().min(1).max(100).optional(),
     cursor: z.string().max(256).optional(),
   }).strict().optional(),
@@ -88,6 +90,7 @@ export function createPlayground(options: PlaygroundOptions) {
     simulatedClients: clients,
     liveClients: liveKeys ? [...liveKeys.keys()] : [],
     gatewayUrl: liveUrl,
+    simulatedNow: new Date(Date.now() + clockOffsetMs).toISOString(),
   }));
 
   app.post('/api/execute', async (request, reply) => {

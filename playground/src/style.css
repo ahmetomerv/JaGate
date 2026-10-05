@@ -158,6 +158,11 @@ h2 { font-size: 18px; }
 .simulation-controls input { width: 58px; }
 .utility-button { font-weight: 600; white-space: nowrap; }
 .utility-button:hover:not(:disabled) { border-color: #83abdf; color: #205ca7; }
+.attention-shortcuts { max-width: 900px; margin: 0 0 18px; padding: 13px 15px; border: 1px solid #dce7f6; border-radius: 5px; background: #f8faff; display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; }
+.attention-shortcuts > strong { color: #3b5c7f; font-size: 11px; }
+.attention-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.attention-shortcuts label { margin-left: auto; color: #5f7284; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.attention-shortcuts input { width: 66px; margin-left: 7px; padding: 5px 7px; border: 1px solid #d5dee7; border-radius: 4px; color: #284055; }
 .control-divider { width: 1px; height: 22px; background: #d6e1ed; margin: 0 4px; }
 .seconds-label { color: #99a9b9; font-size: 10px; }
 .live-strip { justify-content: flex-start; color: #738da7; font-size: 11px; }

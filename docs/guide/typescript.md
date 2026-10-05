@@ -72,7 +72,7 @@ The calling app owns the action and its credentials. It should execute the exact
 | Method | Purpose |
 | --- | --- |
 | `createRequest(input, signal?)` | Create a request, or retrieve an exact idempotent repeat. |
-| `listRequests({ status, deliveryStatus, executionStatus, limit, cursor }?, signal?)` | Browse this client's requests, newest first. |
+| `listRequests({ status, deliveryStatus, executionStatus, claimedBefore, expiresBefore, limit, cursor }?, signal?)` | Browse this client's requests, newest first; use UTC cutoffs for attention queries. |
 | `getRequest(id, signal?)` | Read one request owned by this client. |
 | `getRequestEvents(id, { limit, cursor }?, signal?)` | Read the request's recorded gateway events, oldest first. Follow `nextCursor` for later pages. |
 | `waitForDecision(id, { timeoutMs, signal? })` | Poll until decision is no longer pending. |
@@ -100,6 +100,20 @@ for (const request of page.items) {
 ```
 
 The snippet assumes the `ApprovalClient` import from the example above and a `JAGATE_READ_KEY` environment variable containing the read-only key. Both APIs return `{ items, nextCursor }`, and a null cursor means the last page. Request pages are newest first; events for one request are oldest first. See [List and filter requests](/API#list-and-filter-requests) and [Per-request event timeline](/API#per-request-event-timeline) for filters, event fields, and pagination behavior.
+
+To find requests needing attention, choose a cutoff once and reuse it while paging:
+
+```ts
+const now = Date.now();
+const oldClaimCutoff = new Date(now - 10 * 60_000).toISOString();
+const expiryCutoff = new Date(now + 10 * 60_000).toISOString();
+const failedDeliveries = await reader.listRequests({ status: 'pending', deliveryStatus: 'failed' });
+const oldClaims = await reader.listRequests({ status: 'approved', executionStatus: 'claimed', claimedBefore: oldClaimCutoff });
+const expiring = await reader.listRequests({ status: 'pending', expiresBefore: expiryCutoff });
+// If oldClaims.nextCursor exists, pass it with the same filters and oldClaimCutoff.
+```
+
+Read-only monitoring can flag these requests. It must not assume an old claim means the caller's action failed; check the target system before any follow-up. See [Requests needing attention](/API#requests-needing-attention).
 
 `waitForDecision` supports `AbortSignal`. `WaitTimeoutError` means only that the local wait ended; it does **not** mean the approval expired. A real server-side expiry is returned as `status: 'expired'`. Non-success HTTP responses throw `ApiError` with `status` and `code` fields. Keep the claim token until result reporting succeeds. If the process crashes after a claim, reconcile the external action before requesting a new approval.
 

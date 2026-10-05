@@ -6,10 +6,15 @@ import { GatewayError } from './errors.js';
 import { clientKeyScopes, createSchema, type ClientKeyScope } from './model.js';
 
 const idSchema = z.string().uuid();
+const cutoffSchema = z.string().max(24).datetime().regex(/(?:\.\d{1,3})?Z$/)
+  .refine((value) => !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 19) === value.slice(0, 19), 'invalid UTC date')
+  .transform((value) => new Date(value).toISOString());
 const listQuerySchema = z.object({
   status: z.enum(['pending', 'approved', 'rejected', 'expired', 'cancelled']).optional(),
   deliveryStatus: z.enum(['pending', 'retrying', 'delivered', 'failed']).optional(),
   executionStatus: z.enum(['unclaimed', 'claimed', 'succeeded', 'failed']).optional(),
+  claimedBefore: cutoffSchema.optional(),
+  expiresBefore: cutoffSchema.optional(),
   limit: z.string().regex(/^[1-9][0-9]{0,2}$/).transform(Number).pipe(z.number().max(100)).default('20'),
   cursor: z.string().max(256).regex(/^[A-Za-z0-9_-]+$/).optional(),
 }).strict();
@@ -108,6 +113,8 @@ export function createHttpServer(core: GatewayCore, clientKeys: ReadonlyMap<stri
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.deliveryStatus ? { deliveryStatus: filters.deliveryStatus } : {}),
         ...(filters.executionStatus ? { executionStatus: filters.executionStatus } : {}),
+        ...(filters.claimedBefore ? { claimedBefore: filters.claimedBefore } : {}),
+        ...(filters.expiresBefore ? { expiresBefore: filters.expiresBefore } : {}),
         ...(before ? { before } : {}),
       });
     });
