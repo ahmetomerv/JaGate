@@ -39,4 +39,4 @@ Client app ← decision + one claim ← JaGate
 Client app → performs its own action → reports the result
 ```
 
-For a first local test, follow [Get started locally](/guide/getting-started). The example asks for approval before writing a harmless temporary text file.
+For a first local test, follow [Get started locally](/guide/getting-started). The example asks for approval before writing a harmless temporary text file. Then use the [scenario guides](/guide/scenarios) for deployment, backup deletion, and claimed-request recovery.

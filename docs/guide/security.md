@@ -16,6 +16,8 @@ Decision states are `pending`, `approved`, `rejected`, `expired`, and `cancelled
 
 An approved request may be claimed after its approval deadline, because expiry applies only while pending. A pending request that reaches its deadline expires and fails closed. A claimed request with no result has an **unknown external outcome**. It remains claimed after restart: the caller might have completed the action before crashing. Never automatically retry the side effect just because JaGate shows `claimed`. Inspect the target system and reconcile it first. Use the target system's own idempotency key if available.
 
+For a step-by-step reconciliation using request listing and the event timeline, see [Recover a claimed request after a crash](/guide/scenarios#recover-a-claimed-request-after-a-crash).
+
 This gateway does not provide exactly once execution of external effects. It records what the claimant reports; it cannot verify or undo an external action.
 
 ## Telegram delivery and process restarts

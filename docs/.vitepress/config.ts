@@ -28,6 +28,7 @@ export default defineConfig({
         items: [
           { text: 'Overview', link: '/' },
           { text: 'Get started locally', link: '/guide/getting-started' },
+          { text: 'Scenario guides', link: '/guide/scenarios' },
           { text: 'Local playground', link: '/guide/playground' },
           { text: 'Docker Compose', link: '/guide/docker' },
           { text: 'Configuration and clients', link: '/guide/configuration' },

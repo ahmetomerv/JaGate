@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added scenario guides for deployment approval, backup deletion approval, and reconciliation after a claimed request's caller crashes.
 - Added client-scoped request listing with decision, delivery, and execution status filters and cursor pagination.
 - Added an owner-scoped, paginated event timeline for each request, with atomic records of gateway state changes.
 - Added hashed, scoped, revocable issued client keys. Configured bootstrap keys manage them; the raw issued key is returned only at creation.

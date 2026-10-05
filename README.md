@@ -35,6 +35,7 @@ Client app → performs its own action → reports the result
 ```
 
 - [Get started locally](https://ahmetomerv.github.io/JaGate/guide/getting-started.html)
+- [Scenario guides](https://ahmetomerv.github.io/JaGate/guide/scenarios.html)
 - [Docker Compose](https://ahmetomerv.github.io/JaGate/guide/docker.html)
 - [HTTP API](https://ahmetomerv.github.io/JaGate/API.html)
 - [TypeScript client](https://ahmetomerv.github.io/JaGate/guide/typescript.html)
