@@ -61,6 +61,13 @@ test('playground guards commands and exercises HTTP auth, ownership and idempote
   assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id, clientId: 'backups' }))).json().status, 404);
   assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id, auth: 'missing' }))).json().status, 401);
   assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id, auth: 'invalid' }))).json().status, 401);
+  const timeline = (await call(app, session, '/api/execute', command('events', { requestId: id, eventPage: { limit: 1 } }))).json();
+  assert.equal(timeline.status, 200);
+  assert.deepEqual(timeline.body.items.map((event: { type: string }) => event.type), ['request.created']);
+  assert.equal(timeline.body.nextCursor, '1');
+  assert.deepEqual((await call(app, session, '/api/execute', command('events', { requestId: id, eventPage: { cursor: '1' } }))).json().body.items.map((event: { type: string }) => event.type), ['delivery.delivered']);
+  assert.equal((await call(app, session, '/api/execute', command('events', { requestId: id, clientId: 'backups' }))).json().status, 404);
+  assert.equal((await call(app, session, '/api/execute', command('events', { requestId: id, auth: 'missing' }))).json().status, 401);
 });
 
 test('simulated decisions honor approvers, claims and one-time results across restart', async () => {
@@ -89,6 +96,8 @@ test('simulated decisions honor approvers, claims and one-time results across re
   apps.push(restarted);
   const nextSession = await token(restarted);
   assert.equal((await call(restarted, nextSession, '/api/execute', command('get', { requestId: id }))).json().body.executionStatus, 'failed');
+  assert.deepEqual((await call(restarted, nextSession, '/api/execute', command('events', { requestId: id }))).json().body.items.map((event: { type: string }) => event.type),
+    ['request.created', 'delivery.delivered', 'decision.approved', 'execution.claimed', 'execution.failed']);
 });
 
 test('simulated clock expires pending requests and cancellation stops decisions', async () => {
@@ -130,5 +139,8 @@ test('live mode keeps client keys in the backend while calling the real HTTP rou
     assert.equal(listed.status, 200);
     assert.deepEqual(listed.body.items.map((item: { id: string }) => item.id), [created.body.id]);
     assert.equal((await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'get', requestId: created.body.id, auth: 'missing' })).json().status, 401);
+    const events = (await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'events', requestId: created.body.id })).json();
+    assert.equal(events.status, 200);
+    assert.deepEqual(events.body.items.map((event: { type: string }) => event.type), ['request.created']);
   } finally { await gateway.close(); db.close(); }
 });

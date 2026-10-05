@@ -16,6 +16,7 @@ Read the [**JaGate documentation**](https://ahmetomerv.github.io/JaGate/) for se
 - **Separate clients.** Each application has its own API key, destination chat, and approver list.
 - **Any language.** Use the HTTP API, or the included TypeScript client.
 - **Durable state.** Proposals, delivery, decisions, and claims are stored in SQLite and survive restarts.
+- **Request history.** Each request has a durable timeline of delivery, decision, and reported execution events.
 
 For the full picture, see the [documentation](https://ahmetomerv.github.io/JaGate/).
 

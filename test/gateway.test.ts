@@ -169,6 +169,8 @@ test('a changed destination requeues pending delivery and invalidates old button
     await moved.process(callback(newJob, 8, -200));
     assert.equal(restarted.get('primary', request.id).status, 'approved');
     assert.equal(restarted.get('primary', request.id).decidedBy, '8');
+    assert.deepEqual(restarted.events('primary', request.id, {}).items.map((event) => event.type),
+      ['request.created', 'delivery.delivered', 'delivery.requeued', 'delivery.delivered', 'decision.approved']);
   } finally { await moved.stop(); }
 });
 
@@ -220,7 +222,7 @@ test('upgrading an existing database requeues a pending message without a chat b
   oldSchema.prepare('DELETE FROM schema_migrations WHERE version = ?').run('002_delivery_chat.sql');
   oldSchema.close();
   const reopened = openDatabase(path); dbs.push(reopened);
-  assert.equal((reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 3);
+  assert.equal((reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 4);
   const restarted = new GatewayCore(reopened, now);
   const after = new FakeTelegram();
   const gateway = new TelegramGateway(restarted, after, routes());

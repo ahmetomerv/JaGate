@@ -111,7 +111,7 @@ test('migration and canonical idempotency survive restart without changing appro
   db.close();
   const reopened = openDatabase(path); dbs.push(reopened);
   const restarted = new GatewayCore(reopened, clock);
-  assert.equal((reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 3);
+  assert.equal((reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 4);
   const reordered = { ...original, metadata: { options: { a: 1, b: 2 }, ticket: 'OPS-1' } };
   assert.equal(restarted.create('primary', reordered).request.id, created.id);
   assert.throws(() => restarted.create('primary', { ...original, details: [{ label: 'Target', value: 'production' }] }), { code: 'idempotency_conflict' });
@@ -158,7 +158,7 @@ test('all v1 routes require a valid key while health stays public', async () => 
   const id = core.create('primary', input()).request.id;
   const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
   const routes: Array<['GET' | 'POST', string]> = [
-    ['POST', '/v1/requests'], ['GET', '/v1/requests'], ['GET', `/v1/requests/${id}`],
+    ['POST', '/v1/requests'], ['GET', '/v1/requests'], ['GET', `/v1/requests/${id}`], ['GET', `/v1/requests/${id}/events`],
     ['POST', `/v1/requests/${id}/cancel`], ['POST', `/v1/requests/${id}/claim`],
     ['POST', `/v1/requests/${id}/result`],
   ];
@@ -205,6 +205,91 @@ test('listing is owner scoped, filtered, ordered, paginated, and reflects expiry
     assert.equal(response.json().error.code, 'invalid_input', query);
   }
   await app.close();
+});
+
+test('event timeline records lifecycle transitions once, in order, without credentials or request content', async () => {
+  const { core, db, advance } = setup();
+  const created = core.create('primary', input('timeline:approved')).request;
+  assert.equal(core.create('primary', input('timeline:approved')).created, false);
+  const job = core.dueDeliveries()[0]!;
+  core.deliveryFailed(created.id, true, 'temporary send error');
+  advance(2_000);
+  core.deliverySucceeded(created.id, '-100', '101');
+  core.deliverySucceeded(created.id, '-100', '101');
+  core.decide(job.callbackRef, '-100', '101', '7', 'approved');
+  core.decide(job.callbackRef, '-100', '101', '7', 'approved');
+  const claim = core.claim('primary', created.id);
+  assert.throws(() => core.claim('primary', created.id), { code: 'not_claimable' });
+  core.report('primary', created.id, claim.claimToken, 'succeeded', 'private result summary');
+  assert.throws(() => core.report('primary', created.id, claim.claimToken, 'succeeded', 'again'), { code: 'invalid_state' });
+  const events = core.events('primary', created.id, { limit: 50 }).items;
+  assert.deepEqual(events.map((event) => event.type), [
+    'request.created', 'delivery.retry_scheduled', 'delivery.delivered', 'decision.approved', 'execution.claimed', 'execution.succeeded',
+  ]);
+  assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(events.map((event) => event.attempt), [null, 1, 2, null, null, null]);
+  assert.equal(events[3]?.actorId, '7');
+  assert.ok(events.every((event) => !Number.isNaN(Date.parse(event.occurredAt))));
+  const stored = JSON.stringify(db.prepare('SELECT * FROM request_events WHERE request_id = ?').all(created.id));
+  assert.doesNotMatch(stored, /private result summary|Compact local records|OPS-1|temporary send error|claimToken|callback_ref/);
+  assert.doesNotMatch(JSON.stringify(events), new RegExp(claim.claimToken));
+});
+
+test('timeline API is owner scoped and paginated; expiry, cancellation, rejection and terminal delivery are recorded', async () => {
+  const { core, advance } = setup();
+  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)], ['secondary', 'b'.repeat(32)]]), () => true);
+  const primary = { authorization: `Bearer ${'a'.repeat(32)}` };
+  const secondary = { authorization: `Bearer ${'b'.repeat(32)}` };
+  const expired = core.create('primary', input('timeline:expired')).request;
+  const cancelled = core.create('primary', input('timeline:cancelled')).request;
+  core.cancel('primary', cancelled.id);
+  const rejected = core.create('primary', input('timeline:rejected')).request;
+  const rejectedJob = core.dueDeliveries().find((job) => job.id === rejected.id)!;
+  core.deliverySucceeded(rejected.id, '-100', '101');
+  core.decide(rejectedJob.callbackRef, '-100', '101', '7', 'rejected');
+  const failed = core.create('primary', input('timeline:failed')).request;
+  core.deliveryFailed(failed.id, false, 'terminal');
+  advance(900_000);
+  const read = (id: string, query = '', headers = primary) => app.inject({ method: 'GET', url: `/v1/requests/${id}/events${query}`, headers });
+  const page = (await read(expired.id, '?limit=1')).json();
+  assert.deepEqual(page.items.map((event: { type: string }) => event.type), ['request.created']);
+  assert.equal(page.nextCursor, '1');
+  assert.deepEqual((await read(expired.id, `?limit=1&cursor=${page.nextCursor}`)).json().items.map((event: { type: string }) => event.type), ['decision.expired']);
+  assert.equal((await read(expired.id, '?cursor=2')).json().nextCursor, null);
+  assert.deepEqual(core.events('primary', cancelled.id, {}).items.map((event) => event.type), ['request.created', 'decision.cancelled']);
+  assert.deepEqual(core.events('primary', rejected.id, {}).items.map((event) => event.type), ['request.created', 'delivery.delivered', 'decision.rejected']);
+  assert.deepEqual(core.events('primary', failed.id, {}).items.map((event) => event.type), ['request.created', 'delivery.failed', 'decision.expired']);
+  assert.equal((await read(expired.id, '', secondary)).statusCode, 404);
+  assert.equal((await read('123e4567-e89b-42d3-a456-426614174000')).statusCode, 404);
+  for (const query of ['?limit=0', '?limit=101', '?limit=1.5', '?cursor=0', '?cursor=no', '?extra=value'])
+    assert.equal((await read(expired.id, query)).statusCode, 400, query);
+  await app.close();
+});
+
+test('timeline schema upgrade leaves existing history empty and records later transitions', () => {
+  const { db, path, core, clock } = setup();
+  const request = core.create('primary', input('timeline:legacy')).request;
+  db.exec('DROP TABLE request_events');
+  db.prepare("DELETE FROM schema_migrations WHERE version = '004_request_events.sql'").run();
+  db.close();
+  const reopened = openDatabase(path); dbs.push(reopened);
+  const restarted = new GatewayCore(reopened, clock);
+  assert.equal(restarted.get('primary', request.id).status, 'pending');
+  assert.deepEqual(restarted.events('primary', request.id, {}).items, []);
+  assert.equal(restarted.cancel('primary', request.id).status, 'cancelled');
+  assert.deepEqual(restarted.events('primary', request.id, {}).items.map((event) => event.type), ['decision.cancelled']);
+  assert.equal((reopened.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '004_request_events.sql'").get() as { count: number }).count, 1);
+});
+
+test('a failed event write rolls back the request state change', () => {
+  const { db, core } = setup();
+  const request = core.create('primary', input('timeline:atomic')).request;
+  db.exec("CREATE TRIGGER block_events BEFORE INSERT ON request_events BEGIN SELECT RAISE(ABORT, 'blocked event'); END");
+  assert.throws(() => core.cancel('primary', request.id), /blocked event/);
+  assert.equal(core.get('primary', request.id).status, 'pending');
+  assert.deepEqual(core.events('primary', request.id, {}).items.map((event) => event.type), ['request.created']);
+  db.exec('DROP TRIGGER block_events');
+  assert.equal(core.cancel('primary', request.id).status, 'cancelled');
 });
 
 test('HTTP state errors, cancellation, and result token checks have stable responses', async () => {
@@ -432,6 +517,11 @@ test('client methods complete a failed execution and preserve API errors', async
   assert.equal(final.executionStatus, 'failed');
   assert.equal(final.resultSummary, 'Target unavailable');
   assert.equal((await client.getRequest(request.id)).executionStatus, 'failed');
+  const firstEvents = await client.getRequestEvents(request.id, { limit: 2 });
+  assert.deepEqual(firstEvents.items.map((event) => event.type), ['request.created', 'delivery.delivered']);
+  assert.equal(typeof firstEvents.nextCursor, 'string');
+  assert.deepEqual((await client.getRequestEvents(request.id, { cursor: firstEvents.nextCursor! })).items.map((event) => event.type),
+    ['decision.approved', 'execution.claimed', 'execution.failed']);
   const cancellable = await client.createRequest({ idempotencyKey: 'sdk:cancel', action: 'maintenance', title: 'Cancel me',
     description: 'No work required', expiresInSeconds: 60 });
   assert.equal((await client.cancel(cancellable.id)).status, 'cancelled');

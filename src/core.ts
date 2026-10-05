@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Db } from './storage.js';
 import { GatewayError } from './errors.js';
-import { canonicalContent, hash, type CreateInput, type DecisionStatus, type ListRequestsPage, type ListRequestsQuery, type RequestView } from './model.js';
+import { canonicalContent, hash, type CreateInput, type DecisionStatus, type ListRequestsPage, type ListRequestsQuery, type RequestEvent, type RequestEventType, type RequestEventsPage, type RequestView } from './model.js';
 
 type Row = {
   id: string; client_id: string; idempotency_key: string; fingerprint: string; action: string; title: string;
@@ -21,6 +21,11 @@ export class GatewayCore {
 
   private iso(): string { return this.now().toISOString(); }
   private row(id: string): Row | undefined { return this.db.prepare('SELECT * FROM requests WHERE id = ?').get(id) as Row | undefined; }
+  private appendEvent(id: string, type: RequestEventType, occurredAt: string, actorId: string | null = null, attempt: number | null = null): void {
+    this.db.prepare(`INSERT INTO request_events(request_id, sequence, type, occurred_at, actor_id, attempt)
+      SELECT ?, COALESCE(MAX(sequence), 0) + 1, ?, ?, ?, ? FROM request_events WHERE request_id = ?`)
+      .run(id, type, occurredAt, actorId, attempt, id);
+  }
   private view(row: Row): RequestView {
     return {
       id: row.id, clientId: row.client_id, action: row.action, title: row.title, description: row.description,
@@ -34,8 +39,13 @@ export class GatewayCore {
   }
 
   expire(): number {
-    return this.db.prepare("UPDATE requests SET decision_status = 'expired', decided_at = ? WHERE decision_status = 'pending' AND expires_at <= ?")
-      .run(this.iso(), this.iso()).changes;
+    return this.db.transaction(() => {
+      const now = this.iso();
+      const rows = this.db.prepare("UPDATE requests SET decision_status = 'expired', decided_at = ? WHERE decision_status = 'pending' AND expires_at <= ? RETURNING id")
+        .all(now, now) as Array<{ id: string }>;
+      for (const row of rows) this.appendEvent(row.id, 'decision.expired', now);
+      return rows.length;
+    })();
   }
 
   create(clientId: string, input: CreateInput): { request: RequestView; created: boolean } {
@@ -56,6 +66,7 @@ export class GatewayCore {
         (id,client_id,idempotency_key,fingerprint,content_json,action,title,description,details_json,metadata_json,created_at,expires_at,decision_status,execution_status,delivery_status,next_delivery_at,callback_ref)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending','unclaimed','pending',?,?)`)
         .run(id,clientId,input.idempotencyKey,fingerprint,content,input.action,input.title,input.description,JSON.stringify(input.details),JSON.stringify(input.metadata),createdAt,expiresAt,createdAt,ref);
+      this.appendEvent(id, 'request.created', createdAt);
       return { request: this.view(this.row(id)!), created: true };
     })();
   }
@@ -72,6 +83,17 @@ export class GatewayCore {
     const row = this.db.prepare('SELECT * FROM requests WHERE id = ? AND client_id = ?').get(id, clientId) as Row | undefined;
     if (!row) throw new GatewayError('not_found', 404, 'request not found');
     return this.view(row);
+  }
+
+  events(clientId: string, id: string, options: { limit?: number; after?: number }): RequestEventsPage {
+    this.get(clientId, id);
+    const limit = options.limit ?? 50;
+    const rows = this.db.prepare(`SELECT sequence, type, occurred_at, actor_id, attempt FROM request_events
+      WHERE request_id = ? AND sequence > ? ORDER BY sequence ASC LIMIT ?`)
+      .all(id, options.after ?? 0, limit + 1) as Array<{ sequence: number; type: RequestEventType; occurred_at: string; actor_id: string | null; attempt: number | null }>;
+    const page = rows.slice(0, limit);
+    const items: RequestEvent[] = page.map((row) => ({ sequence: row.sequence, type: row.type, occurredAt: row.occurred_at, actorId: row.actor_id, attempt: row.attempt }));
+    return { items, nextCursor: rows.length > limit ? String(page.at(-1)!.sequence) : null };
   }
 
   list(clientId: string, options: Omit<ListRequestsQuery, 'cursor'> & { before?: { createdAt: string; id: string } }): ListRequestsPage {
@@ -98,10 +120,14 @@ export class GatewayCore {
 
   cancel(clientId: string, id: string): RequestView {
     this.expire();
-    const changed = this.db.prepare("UPDATE requests SET decision_status = 'cancelled', decided_at = ? WHERE id = ? AND client_id = ? AND decision_status = 'pending' AND expires_at > ?")
-      .run(this.iso(), id, clientId, this.iso()).changes;
-    if (!changed) { this.get(clientId, id); throw new GatewayError('invalid_state', 409, 'only a pending request can be cancelled'); }
-    return this.get(clientId, id);
+    return this.db.transaction(() => {
+      const now = this.iso();
+      const changed = this.db.prepare("UPDATE requests SET decision_status = 'cancelled', decided_at = ? WHERE id = ? AND client_id = ? AND decision_status = 'pending' AND expires_at > ?")
+        .run(now, id, clientId, now).changes;
+      if (!changed) { this.get(clientId, id); throw new GatewayError('invalid_state', 409, 'only a pending request can be cancelled'); }
+      this.appendEvent(id, 'decision.cancelled', now);
+      return this.get(clientId, id);
+    })();
   }
 
   callbackClient(ref: string): string | undefined {
@@ -113,22 +139,30 @@ export class GatewayCore {
     const row = this.db.prepare('SELECT * FROM requests WHERE callback_ref = ?').get(ref) as Row | undefined;
     if (!row || row.delivery_chat_id !== chatId || row.delivery_message_id !== messageId)
       return { outcome: 'This button does not belong to an active request message.' };
-    const changed = this.db.prepare(`UPDATE requests SET decision_status = ?, decided_by = ?, decided_at = ?
-      WHERE id = ? AND decision_status = 'pending' AND expires_at > ? AND delivery_status = 'delivered' AND delivery_chat_id = ? AND delivery_message_id = ?`)
-      .run(decision, actorId, this.iso(), row.id, this.iso(), chatId, messageId).changes;
-    const current = this.getInternal(row.id);
-    return { outcome: changed ? (decision === 'approved' ? 'Approved.' : 'Rejected.') : `Already ${current.status}.`, request: current };
+    return this.db.transaction(() => {
+      const now = this.iso();
+      const changed = this.db.prepare(`UPDATE requests SET decision_status = ?, decided_by = ?, decided_at = ?
+        WHERE id = ? AND decision_status = 'pending' AND expires_at > ? AND delivery_status = 'delivered' AND delivery_chat_id = ? AND delivery_message_id = ?`)
+        .run(decision, actorId, now, row.id, now, chatId, messageId).changes;
+      if (changed) this.appendEvent(row.id, `decision.${decision}`, now, actorId);
+      const current = this.getInternal(row.id);
+      return { outcome: changed ? (decision === 'approved' ? 'Approved.' : 'Rejected.') : `Already ${current.status}.`, request: current };
+    })();
   }
 
   claim(clientId: string, id: string): { claimId: string; claimToken: string; request: RequestView } {
     this.expire();
     const claimId = randomUUID();
     const claimToken = randomBytes(32).toString('base64url');
-    const changed = this.db.prepare(`UPDATE requests SET execution_status = 'claimed', claimed_at = ?, claim_id = ?, claim_token_hash = ?
-      WHERE id = ? AND client_id = ? AND decision_status = 'approved' AND execution_status = 'unclaimed'`)
-      .run(this.iso(), claimId, hash(claimToken), id, clientId).changes;
-    if (!changed) { this.get(clientId, id); throw new GatewayError('not_claimable', 409, 'request is not approved and unclaimed'); }
-    return { claimId, claimToken, request: this.get(clientId, id) };
+    return this.db.transaction(() => {
+      const now = this.iso();
+      const changed = this.db.prepare(`UPDATE requests SET execution_status = 'claimed', claimed_at = ?, claim_id = ?, claim_token_hash = ?
+        WHERE id = ? AND client_id = ? AND decision_status = 'approved' AND execution_status = 'unclaimed'`)
+        .run(now, claimId, hash(claimToken), id, clientId).changes;
+      if (!changed) { this.get(clientId, id); throw new GatewayError('not_claimable', 409, 'request is not approved and unclaimed'); }
+      this.appendEvent(id, 'execution.claimed', now);
+      return { claimId, claimToken, request: this.get(clientId, id) };
+    })();
   }
 
   report(clientId: string, id: string, token: string, status: 'succeeded' | 'failed', summary: string): RequestView {
@@ -137,11 +171,15 @@ export class GatewayCore {
     const candidate = Buffer.from(hash(token), 'hex');
     const saved = Buffer.from(row.claim_token_hash ?? '0'.repeat(64), 'hex');
     if (!timingSafeEqual(candidate, saved) || !row.claim_token_hash) throw new GatewayError('invalid_claim_token', 403, 'invalid claim token');
-    const changed = this.db.prepare(`UPDATE requests SET execution_status = ?, result_summary = ?, result_at = ?
-      WHERE id = ? AND client_id = ? AND execution_status = 'claimed' AND claim_token_hash = ?`)
-      .run(status, summary, this.iso(), id, clientId, row.claim_token_hash).changes;
-    if (!changed) throw new GatewayError('invalid_state', 409, 'result already reported');
-    return this.get(clientId, id);
+    return this.db.transaction(() => {
+      const now = this.iso();
+      const changed = this.db.prepare(`UPDATE requests SET execution_status = ?, result_summary = ?, result_at = ?
+        WHERE id = ? AND client_id = ? AND execution_status = 'claimed' AND claim_token_hash = ?`)
+        .run(status, summary, now, id, clientId, row.claim_token_hash).changes;
+      if (!changed) throw new GatewayError('invalid_state', 409, 'result already reported');
+      this.appendEvent(id, `execution.${status}`, now);
+      return this.get(clientId, id);
+    })();
   }
 
   dueDeliveries(limit = 10): DeliveryJob[] {
@@ -153,9 +191,13 @@ export class GatewayCore {
   }
 
   deliverySucceeded(id: string, chatId: string, messageId: string): void {
-    this.db.prepare(`UPDATE requests SET delivery_status = 'delivered', delivery_attempts = delivery_attempts + 1,
-      delivery_chat_id = ?, delivery_message_id = ?, delivery_error = NULL
-      WHERE id = ? AND delivery_status IN ('pending','retrying')`).run(chatId, messageId, id);
+    this.db.transaction(() => {
+      const row = this.db.prepare(`UPDATE requests SET delivery_status = 'delivered', delivery_attempts = delivery_attempts + 1,
+        delivery_chat_id = ?, delivery_message_id = ?, delivery_error = NULL
+        WHERE id = ? AND delivery_status IN ('pending','retrying') RETURNING delivery_attempts`)
+        .get(chatId, messageId, id) as { delivery_attempts: number } | undefined;
+      if (row) this.appendEvent(id, 'delivery.delivered', this.iso(), null, row.delivery_attempts);
+    })();
   }
 
   requeueMovedDestinations(destinations: ReadonlyMap<string, string>): number {
@@ -167,23 +209,29 @@ export class GatewayCore {
       for (const row of rows) {
         const destination = destinations.get(row.client_id);
         if (!destination || destination === row.delivery_chat_id) continue;
-        changed += this.db.prepare(`UPDATE requests SET delivery_status = 'pending', delivery_attempts = 0,
+        const updated = this.db.prepare(`UPDATE requests SET delivery_status = 'pending', delivery_attempts = 0,
           next_delivery_at = ?, delivery_error = NULL, delivery_chat_id = NULL, delivery_message_id = NULL, callback_ref = ?
           WHERE id = ? AND decision_status = 'pending' AND delivery_status = 'delivered'`)
           .run(this.iso(), randomBytes(12).toString('base64url'), row.id).changes;
+        if (updated) this.appendEvent(row.id, 'delivery.requeued', this.iso());
+        changed += updated;
       }
       return changed;
     })();
   }
 
   deliveryFailed(id: string, retryable: boolean, reason: string): void {
-    const row = this.row(id);
-    if (!row || !['pending', 'retrying'].includes(row.delivery_status)) return;
-    const attempts = row.delivery_attempts + 1;
-    const retry = retryable && attempts < 5 && row.decision_status === 'pending' && row.expires_at > this.iso();
-    const delay = Math.min(60_000, 2000 * 2 ** (attempts - 1));
-    this.db.prepare(`UPDATE requests SET delivery_status = ?, delivery_attempts = ?, next_delivery_at = ?, delivery_error = ? WHERE id = ?`)
-      .run(retry ? 'retrying' : 'failed', attempts, new Date(this.now().getTime() + delay).toISOString(), reason.slice(0, 160), id);
+    this.db.transaction(() => {
+      const row = this.row(id);
+      if (!row || !['pending', 'retrying'].includes(row.delivery_status)) return;
+      const now = this.iso();
+      const attempts = row.delivery_attempts + 1;
+      const retry = retryable && attempts < 5 && row.decision_status === 'pending' && row.expires_at > now;
+      const delay = Math.min(60_000, 2000 * 2 ** (attempts - 1));
+      this.db.prepare(`UPDATE requests SET delivery_status = ?, delivery_attempts = ?, next_delivery_at = ?, delivery_error = ? WHERE id = ?`)
+        .run(retry ? 'retrying' : 'failed', attempts, new Date(this.now().getTime() + delay).toISOString(), reason.slice(0, 160), id);
+      this.appendEvent(id, retry ? 'delivery.retry_scheduled' : 'delivery.failed', now, null, attempts);
+    })();
   }
 
   getOffset(): number { return Number((this.db.prepare("SELECT value FROM settings WHERE key = 'telegram_offset'").get() as { value: string } | undefined)?.value ?? 0); }

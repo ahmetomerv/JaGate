@@ -80,11 +80,40 @@ The response is `{ "items": [/* complete request objects */], "nextCursor": null
 
 The TypeScript client exposes `listRequests({ status, deliveryStatus, executionStatus, limit, cursor })` with `ListRequestsQuery` and `ListRequestsPage` types.
 
+## Per-request event timeline
+
+`GET /v1/requests/:id/events` returns recorded gateway state changes for one request owned by the bearer key's client. Events are ordered oldest first by a per-request `sequence` number. An unknown ID or another client's ID returns 404.
+
+```sh
+curl -sS "http://127.0.0.1:3080/v1/requests/$REQUEST_ID/events?limit=50" \
+  -H "Authorization: Bearer $JAGATE_CLIENT_KEY"
+```
+
+```json
+{
+  "items": [
+    { "sequence": 1, "type": "request.created", "occurredAt": "2026-09-24T12:00:00.000Z", "actorId": null, "attempt": null },
+    { "sequence": 2, "type": "delivery.delivered", "occurredAt": "2026-09-24T12:00:01.000Z", "actorId": null, "attempt": 1 },
+    { "sequence": 3, "type": "decision.approved", "occurredAt": "2026-09-24T12:01:00.000Z", "actorId": "7", "attempt": null }
+  ],
+  "nextCursor": null
+}
+```
+
+`limit` is 1–100 (default 50). When `nextCursor` is non-null, pass it as `cursor` with the same request ID to fetch later events. An empty page returns `items: []` and `nextCursor: null`. Invalid or unknown query parameters return 400 `invalid_input`.
+
+Types include `request.created`, `delivery.delivered`, `delivery.retry_scheduled`, `delivery.failed`, `delivery.requeued`, `decision.approved`, `decision.rejected`, `decision.expired`, `decision.cancelled`, `execution.claimed`, `execution.succeeded`, and `execution.failed`. A delivery event's `attempt` is its numbered send attempt. Decision events from Telegram include the numeric approver ID in `actorId`; other events have `actorId: null`. An event is appended only when its state transition succeeds, in the same database transaction. Idempotent creates, repeated callbacks, and rejected claims or results do not add events. The timeline is a gateway record: a reported execution result is supplied by the caller, not independently verified by JaGate.
+
+Events are recorded from the time this feature is installed. Earlier state changes are not reconstructed, so an older request may have an empty timeline until its next transition. Events omit request content, delivery errors, chat and message IDs, callback references, claim IDs, claim tokens, and result summaries. Use `GET /v1/requests/:id` for the current state and authorized request details.
+
+The TypeScript client exposes `getRequestEvents(id, { limit, cursor })` with `RequestEvent`, `RequestEventsQuery`, and `RequestEventsPage` types.
+
 ## Read, cancel, claim, and report
 
 | Route | Body | Success | Common errors |
 | --- | --- | --- | --- |
 | `GET /v1/requests/:id` | none | 200 request | 404 |
+| `GET /v1/requests/:id/events` | none | 200 timeline page | 400, 404 |
 | `POST /v1/requests/:id/cancel` | `{}` | 200 request; only while pending | 409, 404 |
 | `POST /v1/requests/:id/claim` | `{}` | 200 claim object; only approved and unclaimed | 409, 404 |
 | `POST /v1/requests/:id/result` | see below | 200 request; only from claimant, once | 403, 409, 404 |

@@ -2,12 +2,14 @@
 import { computed, onMounted, ref, watch } from 'vue';
 
 type Mode = 'simulated' | 'live';
-type Operation = 'create' | 'list' | 'get' | 'cancel' | 'claim' | 'result' | 'health' | 'ready';
+type Operation = 'create' | 'list' | 'get' | 'events' | 'cancel' | 'claim' | 'result' | 'health' | 'ready';
 type RequestView = {
   id: string; clientId: string; title: string; action: string; status: string; executionStatus: string;
   deliveryStatus: string; deliveryAttempts: number; createdAt: string; expiresAt: string; resultSummary: string | null;
 };
 type ListPage = { items: RequestView[]; nextCursor: string | null };
+type RequestEvent = { sequence: number; type: string; occurredAt: string; actorId: string | null; attempt: number | null };
+type EventPage = { items: RequestEvent[]; nextCursor: string | null };
 type Entry = { time: string; label: string; status: number; body: unknown };
 type Bootstrap = { token: string; simulatedClients: string[]; liveClients: string[]; gatewayUrl: string };
 
@@ -24,6 +26,10 @@ const listExecutionStatus = ref('');
 const listLimit = ref(20);
 const listCursor = ref('');
 const listCursorStack = ref<string[]>([]);
+const eventPage = ref<EventPage | null>(null);
+const eventLimit = ref(20);
+const eventCursor = ref('');
+const eventCursorStack = ref<string[]>([]);
 const entries = ref<Entry[]>([]);
 const busy = ref(false);
 const error = ref('');
@@ -50,6 +56,7 @@ const endpoints: Array<{ operation: Operation; method: 'GET' | 'POST'; label: st
   { operation: 'create', method: 'POST', label: 'Create request', path: '/v1/requests' },
   { operation: 'list', method: 'GET', label: 'List requests', path: '/v1/requests' },
   { operation: 'get', method: 'GET', label: 'Get request', path: '/v1/requests/:id' },
+  { operation: 'events', method: 'GET', label: 'Request timeline', path: '/v1/requests/:id/events' },
   { operation: 'cancel', method: 'POST', label: 'Cancel request', path: '/v1/requests/:id/cancel' },
   { operation: 'claim', method: 'POST', label: 'Claim approval', path: '/v1/requests/:id/claim' },
   { operation: 'result', method: 'POST', label: 'Report result', path: '/v1/requests/:id/result' },
@@ -68,9 +75,11 @@ const listFilters = computed(() => ({
   limit: Number(listLimit.value),
   ...(listCursor.value ? { cursor: listCursor.value } : {}),
 }));
+const eventFilters = computed(() => ({ limit: Number(eventLimit.value), ...(eventCursor.value ? { cursor: eventCursor.value } : {}) }));
 const requestPath = computed(() => {
   const path = endpoint.value.path.replace(':id', requestId.value || ':id');
-  return operation.value === 'list' ? `${path}?${new URLSearchParams(Object.entries(listFilters.value).map(([key, value]) => [key, String(value)])).toString()}` : path;
+  const query = operation.value === 'list' ? listFilters.value : operation.value === 'events' ? eventFilters.value : null;
+  return query ? `${path}?${new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)])).toString()}` : path;
 });
 const needsRequestId = computed(() => !['create', 'list', 'health', 'ready'].includes(operation.value));
 const previewBody = computed(() => operation.value === 'create' ? {
@@ -78,7 +87,7 @@ const previewBody = computed(() => operation.value === 'create' ? {
   details: parsePreview(detailsText.value), metadata: parsePreview(metadataText.value), expiresInSeconds: Number(expiresInSeconds.value),
 } : operation.value === 'result' ? {
   claimToken: claimToken.value, status: resultStatus.value, summary: resultSummary.value,
-} : operation.value === 'list' ? listFilters.value : {});
+} : operation.value === 'list' ? listFilters.value : operation.value === 'events' ? eventFilters.value : {});
 
 watch([listStatus, listDeliveryStatus, listExecutionStatus, listLimit, clientId, mode], () => {
   listCursor.value = '';
@@ -90,6 +99,11 @@ watch([clientId, mode], () => {
   error.value = '';
   history.value = [];
   void refreshHistory();
+});
+watch([requestId, clientId, mode, eventLimit], () => {
+  eventPage.value = null;
+  eventCursor.value = '';
+  eventCursorStack.value = [];
 });
 
 function parsePreview(value: string) {
@@ -103,7 +117,12 @@ function clearDisplayedResponse() {
 }
 
 function selectOperation(next: Operation) {
-  if (next !== operation.value) clearDisplayedResponse();
+  if (next !== operation.value) {
+    clearDisplayedResponse();
+    eventPage.value = null;
+    eventCursor.value = '';
+    eventCursorStack.value = [];
+  }
   operation.value = next;
   requestTab.value = 'body';
   error.value = '';
@@ -174,6 +193,7 @@ async function execute(sentOperation: Operation) {
   error.value = '';
   const sentMode = mode.value;
   const sentClient = clientId.value;
+  const sentRequestId = requestId.value;
   let payload: unknown;
   try {
     if (sentOperation === 'create') payload = {
@@ -184,12 +204,15 @@ async function execute(sentOperation: Operation) {
     busy.value = true;
     const response = await api('/api/execute', {
       mode: sentMode, clientId: sentClient, operation: sentOperation, auth: auth.value, requestId: requestId.value,
-      ...(sentOperation === 'list' ? { filters: listFilters.value } : {}), payload,
+      ...(sentOperation === 'list' ? { filters: listFilters.value } : {}),
+      ...(sentOperation === 'events' ? { eventPage: eventFilters.value } : {}), payload,
     }) as { status: number; body: Record<string, unknown> };
-    const current = sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value;
+    const current = sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value &&
+      (sentOperation !== 'events' || sentRequestId === requestId.value);
     record(`${sentOperation.toUpperCase()} · ${sentClient} · ${sentMode}`, response.status, response.body, current);
     if (!current) return;
     if (sentOperation === 'list') listPage.value = response.status === 200 ? response.body as unknown as ListPage : null;
+    if (sentOperation === 'events') eventPage.value = response.status === 200 ? response.body as unknown as EventPage : null;
     const view = sentOperation === 'claim' ? response.body.request : response.body;
     if (view && typeof view === 'object' && 'id' in view) {
       const item = view as RequestView;
@@ -198,7 +221,7 @@ async function execute(sentOperation: Operation) {
       requestId.value = item.id;
     }
     if (sentOperation === 'claim' && typeof response.body.claimToken === 'string') claimToken.value = response.body.claimToken;
-    if (sentOperation !== 'list') await refreshHistory();
+    if (!['list', 'events'].includes(sentOperation)) await refreshHistory();
   } catch (cause) {
     if (sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value)
       error.value = cause instanceof Error ? cause.message : 'Request failed';
@@ -219,6 +242,31 @@ async function previousPage() {
   await execute('list');
 }
 
+async function nextEventPage() {
+  if (!eventPage.value?.nextCursor || busy.value) return;
+  eventCursorStack.value.push(eventCursor.value);
+  eventCursor.value = eventPage.value.nextCursor;
+  await execute('events');
+}
+
+async function previousEventPage() {
+  if (!eventCursorStack.value.length || busy.value) return;
+  eventCursor.value = eventCursorStack.value.pop()!;
+  await execute('events');
+}
+
+function eventLabel(type: string): string {
+  return ({
+    'request.created': 'Request created',
+    'delivery.retry_scheduled': 'Delivery retry scheduled', 'delivery.failed': 'Delivery failed',
+    'delivery.delivered': 'Delivered to Telegram', 'delivery.requeued': 'Delivery requeued',
+    'decision.approved': 'Approved', 'decision.rejected': 'Rejected',
+    'decision.expired': 'Expired', 'decision.cancelled': 'Cancelled',
+    'execution.claimed': 'Execution claimed', 'execution.succeeded': 'Result reported: succeeded',
+    'execution.failed': 'Result reported: failed',
+  } as Record<string, string>)[type] ?? type;
+}
+
 async function decide(decision: 'approve' | 'reject') {
   if (busy.value || !requestId.value) return;
   error.value = '';
@@ -233,6 +281,7 @@ async function decide(decision: 'approve' | 'reject') {
     record(`${decision.toUpperCase()} · ${sentClient} · ${sentMode}`, 200, response, current);
     if (!current) return;
     remember(response.request);
+    eventPage.value = null;
     await refreshHistory();
   } catch (cause) {
     if (sentMode === mode.value && sentClient === clientId.value && sentRequestId === requestId.value && sentOperation === operation.value)
@@ -253,6 +302,7 @@ async function advanceTime() {
     const current = sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value;
     record(`ADVANCE CLOCK · ${sentClient} · ${sentMode}`, 200, response, current);
     if (!current) return;
+    eventPage.value = null;
     await refreshHistory();
   } catch (cause) {
     if (sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value)
@@ -332,10 +382,10 @@ onMounted(async () => {
           </div>
 
           <div v-if="requestTab === 'preview'" class="editor-body preview-body">
-            <div class="editor-caption"><span>{{ operation === 'list' ? 'QUERY PARAMETERS' : 'REQUEST BODY' }}</span><span>Read only preview</span></div>
+            <div class="editor-caption"><span>{{ operation === 'list' || operation === 'events' ? 'QUERY PARAMETERS' : 'REQUEST BODY' }}</span><span>Read only preview</span></div>
             <pre>{{ JSON.stringify(previewBody, null, 2) }}</pre>
             <p v-if="operation === 'create' || operation === 'result'" class="help-text">Edit values in the {{ needsRequestId ? 'Params & body' : 'Body' }} tab.</p>
-            <p v-else-if="operation !== 'list'" class="help-text">This endpoint does not require a request body.</p>
+            <p v-else-if="operation !== 'list' && operation !== 'events'" class="help-text">This endpoint does not require a request body.</p>
           </div>
 
           <div v-else class="editor-body">
@@ -365,6 +415,7 @@ onMounted(async () => {
             <template v-else-if="needsRequestId">
               <div class="editor-caption"><span>PATH PARAMETERS</span><span>Required</span></div>
               <div class="form-grid"><label class="span-2">Request ID<input v-model="requestId" placeholder="Select a recent request or paste its UUID" spellcheck="false" /></label></div>
+              <div v-if="operation === 'events'" class="form-grid timeline-options"><label>Page size<input v-model.number="eventLimit" type="number" min="1" max="100" /></label><p class="help-text">Oldest events first. Each event records a gateway state change; no action is executed here.</p></div>
               <template v-if="operation === 'result'">
                 <div class="editor-caption body-caption"><span>APPLICATION / JSON</span><span>Execution result</span></div>
                 <div class="form-grid">
@@ -385,6 +436,18 @@ onMounted(async () => {
               <div class="overview-state"><span class="overview-icon">↗</span><div><strong>{{ operation === 'health' ? 'Gateway health' : 'Gateway readiness' }}</strong><p>This public endpoint does not require authorization or a request body. Click Send to inspect its response.</p></div></div>
             </template>
           </div>
+        </section>
+
+        <section v-if="operation === 'events' && eventPage" class="timeline-results" aria-label="Request timeline">
+          <div class="list-results-heading"><strong>Request timeline</strong><span>{{ eventPage.items.length }} shown</span></div>
+          <p v-if="!eventPage.items.length" class="list-empty">No more events for this request.</p>
+          <ol v-else class="timeline-list">
+            <li v-for="event in eventPage.items" :key="event.sequence" class="timeline-event">
+              <span class="timeline-marker" aria-hidden="true"></span>
+              <div class="timeline-event-content"><strong>{{ eventLabel(event.type) }}</strong><span class="timeline-meta">#{{ event.sequence }} · <time :datetime="event.occurredAt">{{ new Date(event.occurredAt).toLocaleString() }}</time><template v-if="event.actorId"> · Approver {{ event.actorId }}</template><template v-if="event.attempt"> · Attempt {{ event.attempt }}</template></span></div>
+            </li>
+          </ol>
+          <div class="list-pagination"><span>Page {{ eventCursorStack.length + 1 }}</span><div class="list-pagination-actions"><button class="utility-button" :disabled="busy || !eventCursorStack.length" @click="previousEventPage">← Previous</button><button class="utility-button" :disabled="busy || !eventPage.nextCursor" @click="nextEventPage">Next →</button></div></div>
         </section>
 
         <section v-if="operation === 'list' && listPage" class="list-results" aria-label="Listed requests">

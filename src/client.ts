@@ -1,6 +1,6 @@
-import type { CreateRequestInput, ListRequestsPage, ListRequestsQuery, RequestView } from './model.js';
+import type { CreateRequestInput, ListRequestsPage, ListRequestsQuery, RequestEventsPage, RequestEventsQuery, RequestView } from './model.js';
 
-export type { CreateRequestInput, ListRequestsPage, ListRequestsQuery, RequestView } from './model.js';
+export type { CreateRequestInput, ListRequestsPage, ListRequestsQuery, RequestEvent, RequestEventType, RequestEventsPage, RequestEventsQuery, RequestView } from './model.js';
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) { super(message); }
 }
@@ -30,6 +30,13 @@ export class ApprovalClient {
     return this.call(`/v1/requests${search ? `?${search}` : ''}`, 'GET', undefined, signal);
   }
   getRequest(id: string, signal?: AbortSignal): Promise<RequestView> { return this.call(`/v1/requests/${encodeURIComponent(id)}`, 'GET', undefined, signal); }
+  getRequestEvents(id: string, query: RequestEventsQuery = {}, signal?: AbortSignal): Promise<RequestEventsPage> {
+    const params = new URLSearchParams();
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    if (query.cursor) params.set('cursor', query.cursor);
+    const search = params.toString();
+    return this.call(`/v1/requests/${encodeURIComponent(id)}/events${search ? `?${search}` : ''}`, 'GET', undefined, signal);
+  }
   cancel(id: string, signal?: AbortSignal): Promise<RequestView> { return this.call(`/v1/requests/${encodeURIComponent(id)}/cancel`, 'POST', {}, signal); }
   claim(id: string, signal?: AbortSignal): Promise<{ claimId: string; claimToken: string; request: RequestView }> { return this.call(`/v1/requests/${encodeURIComponent(id)}/claim`, 'POST', {}, signal); }
   reportResult(id: string, input: { claimToken: string; status: 'succeeded' | 'failed'; summary: string }, signal?: AbortSignal): Promise<RequestView> {

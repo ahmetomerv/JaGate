@@ -14,6 +14,10 @@ const listQuerySchema = z.object({
   cursor: z.string().max(256).regex(/^[A-Za-z0-9_-]+$/).optional(),
 }).strict();
 const cursorSchema = z.tuple([z.string().datetime(), idSchema]);
+const eventsQuerySchema = z.object({
+  limit: z.string().regex(/^[1-9][0-9]{0,2}$/).transform(Number).pipe(z.number().max(100)).default('50'),
+  cursor: z.string().regex(/^[1-9][0-9]*$/).max(15).optional(),
+}).strict();
 
 function decodeCursor(cursor: string | undefined): { createdAt: string; id: string } | undefined {
   if (!cursor) return undefined;
@@ -83,6 +87,11 @@ export function createHttpServer(core: GatewayCore, clientKeys: ReadonlyMap<stri
       });
     });
     v1.get('/requests/:id', async (request) => core.get(request.clientId, idSchema.parse((request.params as { id: string }).id)));
+    v1.get('/requests/:id/events', async (request) => {
+      const id = idSchema.parse((request.params as { id: string }).id);
+      const { limit, cursor } = eventsQuerySchema.parse(request.query);
+      return core.events(request.clientId, id, { limit, ...(cursor ? { after: Number(cursor) } : {}) });
+    });
     v1.post('/requests/:id/cancel', async (request) => core.cancel(request.clientId, idSchema.parse((request.params as { id: string }).id)));
     v1.post('/requests/:id/claim', async (request) => core.claim(request.clientId, idSchema.parse((request.params as { id: string }).id)));
     v1.post('/requests/:id/result', async (request) => {

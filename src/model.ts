@@ -59,6 +59,12 @@ export type ListRequestsQuery = {
   cursor?: string;
 };
 export type ListRequestsPage = { items: RequestView[]; nextCursor: string | null };
+export type RequestEventType = 'request.created' | 'delivery.retry_scheduled' | 'delivery.failed'
+  | 'delivery.delivered' | 'delivery.requeued' | 'decision.approved' | 'decision.rejected'
+  | 'decision.expired' | 'decision.cancelled' | 'execution.claimed' | 'execution.succeeded' | 'execution.failed';
+export type RequestEvent = { sequence: number; type: RequestEventType; occurredAt: string; actorId: string | null; attempt: number | null };
+export type RequestEventsQuery = { limit?: number; cursor?: string };
+export type RequestEventsPage = { items: RequestEvent[]; nextCursor: string | null };
 
 function stable(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stable);

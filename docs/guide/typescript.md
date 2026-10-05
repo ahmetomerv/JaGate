@@ -72,7 +72,9 @@ The calling app owns the action and its credentials. It should execute the exact
 | Method | Purpose |
 | --- | --- |
 | `createRequest(input, signal?)` | Create a request, or retrieve an exact idempotent repeat. |
+| `listRequests({ status, deliveryStatus, executionStatus, limit, cursor }?, signal?)` | Browse this client's requests, newest first. |
 | `getRequest(id, signal?)` | Read one request owned by this client. |
+| `getRequestEvents(id, { limit, cursor }?, signal?)` | Read the request's recorded gateway events, oldest first. Follow `nextCursor` for later pages. |
 | `waitForDecision(id, { timeoutMs, signal? })` | Poll until decision is no longer pending. |
 | `cancel(id, signal?)` | Cancel a still-pending request. |
 | `claim(id, signal?)` | Atomically claim an approved, unclaimed request. |

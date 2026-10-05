@@ -20,7 +20,7 @@ flowchart LR
 | --- | --- |
 | `src/config.ts` and `src/main.ts` | Validate environment configuration, open SQLite, start Telegram and HTTP, and shut them down. Only one process should use a bot token and database. |
 | `src/http.ts` | Resolves each `/v1` bearer key to a client ID, validates bodies and IDs, maps lifecycle errors to documented HTTP responses, and exposes `/health` and `/ready`. |
-| `src/core.ts` | Owns state transitions, idempotency, expiry, delivery records, atomic claim, and result reporting. It has no HTTP or Telegram request types. Its clock is injected for deterministic tests. |
+| `src/core.ts` | Owns state transitions, idempotency, expiry, delivery records, atomic claim, result reporting, and transactional event records. It has no HTTP or Telegram request types. Its clock is injected for deterministic tests. |
 | `src/storage.ts` and `migrations/` | Opens SQLite in WAL mode and applies numbered SQL migrations transactionally. |
 | `src/telegram.ts` | Formats and escapes messages, routes them by client ID, checks each client's numeric chat and user IDs, polls callbacks, and asks the core to decide. The transport interface lets tests use an in-memory fake. |
 | `src/client.ts` | Makes authenticated HTTP calls and polls for a decision. Its wait timeout and `AbortSignal` affect only the client wait, not the stored request. |
@@ -37,7 +37,7 @@ The HTTP API is usable from any language. The TypeScript client is a convenience
 
 ## SQLite schema at a glance
 
-The schema starts in [`migrations/001_initial.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/001_initial.sql). [`migrations/002_delivery_chat.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/002_delivery_chat.sql) adds the stored destination chat binding. There are three tables and no user-account or workflow tables.
+The schema starts in [`migrations/001_initial.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/001_initial.sql). [`migrations/002_delivery_chat.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/002_delivery_chat.sql) adds the stored destination chat binding. [`migrations/004_request_events.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/004_request_events.sql) adds per-request history. There are four tables and no user-account or workflow tables.
 
 | Table | Main fields | Purpose |
 | --- | --- | --- |
@@ -45,10 +45,11 @@ The schema starts in [`migrations/001_initial.sql`](https://github.com/ahmetomer
 | `requests` | `decision_status`, `decided_by`, `decided_at`, `expires_at` | Human decision or pending expiry/cancellation. `decided_by` is the numeric Telegram user ID for button decisions. |
 | `requests` | `delivery_status`, `delivery_attempts`, `next_delivery_at`, `delivery_error`, `callback_ref`, `delivery_chat_id`, `delivery_message_id` | A small durable notification queue and the binding between one Telegram button and its stored chat and message. The callback contains only the opaque reference and desired decision. |
 | `requests` | `execution_status`, `claimed_at`, `claim_id`, `claim_token_hash`, `result_summary`, `result_at` | Claim ownership and the caller-reported outcome. The raw claim token is never stored. |
+| `request_events` | `request_id`, `sequence`, `type`, `occurred_at`, `actor_id`, `attempt` | Append-only state transition timeline for one request. The event sequence is unique per request. Sensitive request content and authorization material are omitted. |
 | `settings` | `key`, `value` | Stores the Telegram polling offset. An update ID is saved only after that update has been handled. |
 | `schema_migrations` | `version` | Records which numbered SQL migrations were applied. |
 
-The `requests` row is the authoritative record. There is no separate execution queue: the gateway does not run actions. The indexes support due-delivery, pending-expiry, and per-client newest-first listing scans.
+The `requests` row is the authoritative current state. Each successful state change appends its event in the same SQLite transaction, so a failed event write rolls back the state change. The event table begins empty when migration 004 runs; earlier transitions are not reconstructed. There is no separate execution queue: the gateway does not run actions. The indexes support due-delivery, pending-expiry, and per-client newest-first listing scans.
 
 Client IDs and keys live in `CLIENT_KEYS` in the server environment, not in the database. `TELEGRAM_ROUTES` maps each client ID to its current destination chat and approver allowlist. The database stores the client ID on each request and the chat ID only after successful delivery. Changing a key for the same ID preserves access.
 
