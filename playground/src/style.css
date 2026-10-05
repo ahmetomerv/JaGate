@@ -143,6 +143,10 @@ h2 { font-size: 18px; }
 .list-result small { margin-top: 4px; color: #91a0ad; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .list-result-status { color: #5c7390; font-size: 11px; white-space: nowrap; }
 .list-result-status span { margin-left: 10px; }
+.audit-result { display: flex; flex-direction: column; gap: 4px; padding: 12px 19px; border-bottom: 1px solid #eef1f4; color: #455d73; overflow-wrap: anywhere; }
+.audit-result strong { font-size: 12px; }
+.audit-result small { color: #91a0ad; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.key-expiry-actions { display: flex; gap: 12px; margin-top: 10px; }
 .list-empty { color: #8d9caa; padding: 16px 19px; margin: 0; font-size: 11px; }
 .list-pagination-actions { display: flex; gap: 7px; }
 .simulation-strip { margin: 16px 0; background: #f8faff; border: 1px solid #dce7f6; border-radius: 5px; padding: 15px 19px; display: flex; align-items: center; justify-content: space-between; gap: 15px; }

@@ -76,12 +76,18 @@ export type ClientKeyView = {
   label: string;
   scopes: ClientKeyScope[];
   createdAt: string;
+  expiresAt: string | null;
   revokedAt: string | null;
 };
 export type IssuedClientKey = ClientKeyView & { key: string };
 export type ListClientKeysPage = { items: ClientKeyView[]; nextCursor: string | null };
-export type CreateClientKeyInput = { label: string; scopes: ClientKeyScope[] };
+export type CreateClientKeyInput = { label: string; scopes: ClientKeyScope[]; expiresAt?: string };
 export type ListClientKeysQuery = { limit?: number; cursor?: string };
+export type AuditEventType = 'key.issued' | 'key.revoked' | 'request.created' | 'execution.claimed' | 'execution.succeeded' | 'execution.failed';
+export type AuditEvent = { id: number; type: AuditEventType; occurredAt: string; actor: 'bootstrap' | 'issued_key';
+  actorKeyId: string | null; requestId: string | null; subjectKeyId: string | null };
+export type ListAuditEventsQuery = { limit?: number; cursor?: string; requestId?: string; keyId?: string };
+export type ListAuditEventsPage = { items: AuditEvent[]; nextCursor: string | null };
 
 function stable(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stable);

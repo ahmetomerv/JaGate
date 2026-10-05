@@ -6,15 +6,15 @@ import { GatewayError } from './errors.js';
 import { clientKeyScopes, createSchema, type ClientKeyScope } from './model.js';
 
 const idSchema = z.string().uuid();
-const cutoffSchema = z.string().max(24).datetime().regex(/(?:\.\d{1,3})?Z$/)
+const utcTimestampSchema = z.string().max(24).datetime().regex(/(?:\.\d{1,3})?Z$/)
   .refine((value) => !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 19) === value.slice(0, 19), 'invalid UTC date')
   .transform((value) => new Date(value).toISOString());
 const listQuerySchema = z.object({
   status: z.enum(['pending', 'approved', 'rejected', 'expired', 'cancelled']).optional(),
   deliveryStatus: z.enum(['pending', 'retrying', 'delivered', 'failed']).optional(),
   executionStatus: z.enum(['unclaimed', 'claimed', 'succeeded', 'failed']).optional(),
-  claimedBefore: cutoffSchema.optional(),
-  expiresBefore: cutoffSchema.optional(),
+  claimedBefore: utcTimestampSchema.optional(),
+  expiresBefore: utcTimestampSchema.optional(),
   limit: z.string().regex(/^[1-9][0-9]{0,2}$/).transform(Number).pipe(z.number().max(100)).default('20'),
   cursor: z.string().max(256).regex(/^[A-Za-z0-9_-]+$/).optional(),
 }).strict();
@@ -40,11 +40,18 @@ const issueKeySchema = z.object({
   label: z.string().trim().min(1).max(80).refine((value) => !/[\u0000-\u001f]/.test(value)),
   scopes: z.array(z.enum(clientKeyScopes)).min(1).max(clientKeyScopes.length)
     .refine((values) => new Set(values).size === values.length, 'scopes must be unique'),
+  expiresAt: utcTimestampSchema.optional(),
 }).strict();
 const keyListQuerySchema = listQuerySchema.pick({ limit: true, cursor: true });
+const auditQuerySchema = z.object({
+  limit: z.string().regex(/^[1-9][0-9]{0,2}$/).transform(Number).pipe(z.number().max(100)).default('20'),
+  cursor: z.string().regex(/^[1-9][0-9]*$/).max(15).optional(),
+  requestId: idSchema.optional(),
+  keyId: idSchema.optional(),
+}).strict();
 
 declare module 'fastify' {
-  interface FastifyRequest { clientId: string; clientScopes: ReadonlySet<ClientKeyScope> | null; isBootstrapKey: boolean }
+  interface FastifyRequest { clientId: string; clientScopes: ReadonlySet<ClientKeyScope> | null; isBootstrapKey: boolean; issuedKeyId: string | null }
 }
 
 function requireScope(request: { clientScopes: ReadonlySet<ClientKeyScope> | null; isBootstrapKey: boolean }, scope: ClientKeyScope): void {
@@ -87,6 +94,7 @@ export function createHttpServer(core: GatewayCore, clientKeys: ReadonlyMap<stri
     v1.decorateRequest('clientId', '');
     v1.decorateRequest('clientScopes', null);
     v1.decorateRequest('isBootstrapKey', false);
+    v1.decorateRequest('issuedKeyId', null);
     v1.addHook('onRequest', async (request, reply) => {
       const clientId = clientIdFor(request.headers.authorization, clientKeys);
       if (clientId) { request.clientId = clientId; request.isBootstrapKey = true; return; }
@@ -96,12 +104,13 @@ export function createHttpServer(core: GatewayCore, clientKeys: ReadonlyMap<stri
       if (!stored || !clientKeys.has(stored.clientId))
         return reply.code(401).send({ error: { code: 'unauthorized', message: 'valid client bearer key required' } });
       request.clientId = stored.clientId;
+      request.issuedKeyId = stored.id;
       request.clientScopes = new Set(stored.scopes);
     });
     v1.post('/requests', async (request, reply) => {
       requireScope(request, 'requests:create');
       if (!core.storageReady() || !telegramReady()) throw new GatewayError('not_ready', 503, 'gateway is not ready to accept requests');
-      const { request: created, created: isNew } = core.create(request.clientId, createSchema.parse(request.body));
+      const { request: created, created: isNew } = core.create(request.clientId, createSchema.parse(request.body), request.issuedKeyId);
       return reply.code(isNew ? 201 : 200).send(created);
     });
     v1.get('/requests', async (request) => {
@@ -134,18 +143,18 @@ export function createHttpServer(core: GatewayCore, clientKeys: ReadonlyMap<stri
     });
     v1.post('/requests/:id/claim', async (request) => {
       requireScope(request, 'requests:claim');
-      return core.claim(request.clientId, idSchema.parse((request.params as { id: string }).id));
+      return core.claim(request.clientId, idSchema.parse((request.params as { id: string }).id), request.issuedKeyId);
     });
     v1.post('/requests/:id/result', async (request) => {
       requireScope(request, 'requests:result');
       const id = idSchema.parse((request.params as { id: string }).id);
       const body = resultSchema.parse(request.body);
-      return core.report(request.clientId, id, body.claimToken, body.status, body.summary);
+      return core.report(request.clientId, id, body.claimToken, body.status, body.summary, request.issuedKeyId);
     });
     v1.post('/client-keys', async (request, reply) => {
       requireBootstrapKey(request);
-      const { label, scopes } = issueKeySchema.parse(request.body);
-      return reply.code(201).send(core.issueClientKey(request.clientId, label, scopes));
+      const { label, scopes, expiresAt } = issueKeySchema.parse(request.body);
+      return reply.code(201).send(core.issueClientKey(request.clientId, label, scopes, expiresAt));
     });
     v1.get('/client-keys', async (request) => {
       requireBootstrapKey(request);
@@ -156,6 +165,12 @@ export function createHttpServer(core: GatewayCore, clientKeys: ReadonlyMap<stri
     v1.post('/client-keys/:id/revoke', async (request) => {
       requireBootstrapKey(request);
       return core.revokeClientKey(request.clientId, idSchema.parse((request.params as { id: string }).id));
+    });
+    v1.get('/audit-events', async (request) => {
+      requireBootstrapKey(request);
+      const { limit, cursor, requestId, keyId } = auditQuerySchema.parse(request.query);
+      return core.listAuditEvents(request.clientId, { limit, ...(cursor ? { before: Number(cursor) } : {}),
+        ...(requestId ? { requestId } : {}), ...(keyId ? { keyId } : {}) });
     });
   }, { prefix: '/v1' });
   return app;

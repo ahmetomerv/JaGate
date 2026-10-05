@@ -8,7 +8,7 @@ The server routes each client's approval message to its configured Telegram chat
 
 ## Scoped client keys
 
-Each `CLIENT_KEYS` environment entry is a **bootstrap key** for that client. It can use all request routes and manage issued keys for its own client. Keep it in the gateway's local environment or an administrative tool; give applications issued keys with only the permissions they need. The gateway stores issued-key hashes, never their raw values. Bootstrap keys are changed in `CLIENT_KEYS` and loaded on restart; they are not listed or revoked through the API.
+Each `CLIENT_KEYS` environment entry is a **bootstrap key** for that client. It can use all request routes, manage issued keys, and read that client's audit events. Keep it in the gateway's local environment or an administrative tool; give applications issued keys with only the permissions they need. The gateway stores issued-key hashes, never their raw values. Bootstrap keys are changed in `CLIENT_KEYS` and loaded on restart; they are not listed, expired, or revoked through the API.
 
 Create an issued key with `POST /v1/client-keys` using the bootstrap key. In this example, `JAGATE_CLIENT_KEY` must hold that client's bootstrap key:
 
@@ -16,10 +16,10 @@ Create an issued key with `POST /v1/client-keys` using the bootstrap key. In thi
 curl -sS -X POST http://127.0.0.1:3080/v1/client-keys \
   -H "Authorization: Bearer $JAGATE_CLIENT_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"label":"Website approval worker","scopes":["requests:create","requests:read","requests:claim","requests:result"]}'
+  -d '{"label":"Website approval worker","scopes":["requests:create","requests:read","requests:claim","requests:result"],"expiresAt":"2030-01-01T12:00:00.000Z"}'
 ```
 
-The response is HTTP 201 and includes `id`, `clientId`, `label`, `scopes`, `createdAt`, `revokedAt: null`, and the generated `key`. **The raw `key` is returned only on creation.** Store it privately; listing or revoking a key never returns it. Labels are 1–80 characters after trimming, without control characters. `scopes` must be a nonempty, duplicate-free array of these values:
+The response is HTTP 201 and includes `id`, `clientId`, `label`, `scopes`, `createdAt`, `expiresAt`, `revokedAt: null`, and the generated `key`. **The raw `key` is returned only on creation.** Store it privately; listing or revoking a key never returns it. `expiresAt` is optional: omit it for no expiry, or replace the example date with a future UTC ISO 8601 timestamp with a `Z` suffix and at most three fractional second digits. A past or current expiry returns 400 `invalid_input`. Expiry is checked on each API request; at the deadline the issued key returns 401 `unauthorized`, even if its scopes include the route. The bootstrap key is unaffected. Labels are 1–80 characters after trimming, without control characters. `scopes` must be a nonempty, duplicate-free array of these values:
 
 | Scope | Routes allowed |
 | --- | --- |
@@ -29,11 +29,11 @@ The response is HTTP 201 and includes `id`, `clientId`, `label`, `scopes`, `crea
 | `requests:claim` | `POST /v1/requests/:id/claim` |
 | `requests:result` | `POST /v1/requests/:id/result` |
 
-Scopes authorize routes; normal request state checks and the one-time claim token still apply. An issued key cannot create, list, or revoke client keys. A missing or revoked key returns 401 `unauthorized`; a valid key lacking a route's scope returns 403 `insufficient_scope`. A key from another client still gets 404 `not_found` for a request or issued-key ID it does not own. Issued keys work only while their client ID remains configured in `CLIENT_KEYS`.
+Scopes authorize routes; normal request state checks and the one-time claim token still apply. An issued key cannot create, list, or revoke client keys or read the audit feed. A missing, expired, or revoked key returns 401 `unauthorized`; a valid key lacking a route's scope returns 403 `insufficient_scope`. A key from another client still gets 404 `not_found` for a request or issued-key ID it does not own. Issued keys work only while their client ID remains configured in `CLIENT_KEYS`.
 
 The example worker can create a request, read its decision, claim an approval, and report an outcome. Give a monitoring tool only `requests:read` to let it list requests and view timelines. Add `requests:cancel` only if a caller must cancel pending requests. A key with `requests:create` alone cannot poll a decision; `requests:result` alone cannot claim one.
 
-`GET /v1/client-keys?limit=20` lists this client's issued keys newest first, including revoked keys. It returns `{ "items": [/* key metadata, never raw keys */], "nextCursor": null }`. `limit` is 1–100 (default 20); pass a non-null `nextCursor` as `cursor` with the same limit for later pages. Revoke with `POST /v1/client-keys/:id/revoke` and `{}`. The response is the key metadata with `revokedAt`; repeated revocation returns the same metadata. Revocation blocks the next request immediately and persists across restarts. Neither action affects requests already owned by the client.
+`GET /v1/client-keys?limit=20` lists this client's issued keys newest first, including expired and revoked keys. It returns `{ "items": [/* key metadata, never raw keys */], "nextCursor": null }`. `expiresAt` is null for a key without expiry. `limit` is 1–100 (default 20); pass a non-null `nextCursor` as `cursor` with the same limit for later pages. Revoke with `POST /v1/client-keys/:id/revoke` and `{}`. The response is the key metadata with `revokedAt`; repeated revocation returns the same metadata. Revocation blocks the next request immediately and persists across restarts. Neither action affects requests already owned by the client.
 
 ```sh
 curl -sS -X POST "http://127.0.0.1:3080/v1/client-keys/$KEY_ID/revoke" \
@@ -42,6 +42,23 @@ curl -sS -X POST "http://127.0.0.1:3080/v1/client-keys/$KEY_ID/revoke" \
 ```
 
 The TypeScript client exposes `createClientKey`, `listClientKeys`, and `revokeClientKey` for bootstrap-key administration.
+
+## Client audit events
+
+`GET /v1/audit-events` requires the configured bootstrap key and returns only that client's successful request creations, claims, reported outcomes, key issuances, and key revocations. It does not record read requests, failed attempts, Telegram transitions, or an exact idempotent create repeat. The separate [request timeline](#per-request-event-timeline) records gateway state changes, including delivery and decisions.
+
+```sh
+curl -sS 'http://127.0.0.1:3080/v1/audit-events?limit=20' \
+  -H "Authorization: Bearer $JAGATE_CLIENT_KEY"
+```
+
+Each event has a numeric `id`, `type`, `occurredAt`, `actor`, `actorKeyId`, `requestId`, and `subjectKeyId`. `actor` is `bootstrap` or `issued_key`; only the latter has an `actorKeyId`. Issuance and revocation have the affected key ID in `subjectKeyId`. Other event types have the request ID in `requestId`. For example:
+
+```json
+{"items":[{"id":2,"type":"request.created","occurredAt":"2026-10-05T12:00:00.000Z","actor":"issued_key","actorKeyId":"123e4567-e89b-42d3-a456-426614174000","requestId":"123e4567-e89b-42d3-a456-426614174001","subjectKeyId":null}],"nextCursor":null}
+```
+
+Results are newest first. `limit` is 1–100 (default 20); use `nextCursor` as `cursor` with the same filters for later pages. Optional `requestId` filters to one request and `keyId` matches either an acting or affected issued key. Both are UUIDs and combine with AND. Invalid or unknown query parameters return 400 `invalid_input`. Audit rows contain only IDs and timestamps, never raw keys, key hashes, claim tokens, request content, or result summaries. They are appended in the same SQLite transaction as the recorded action, persist after expiry or revocation, and are not backfilled for actions that occurred before migration 006. The TypeScript client exposes `listAuditEvents` for bootstrap-key use.
 
 ## Create a request
 

@@ -111,7 +111,7 @@ test('migration and canonical idempotency survive restart without changing appro
   db.close();
   const reopened = openDatabase(path); dbs.push(reopened);
   const restarted = new GatewayCore(reopened, clock);
-  assert.equal((reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 5);
+  assert.equal((reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 6);
   const reordered = { ...original, metadata: { options: { a: 1, b: 2 }, ticket: 'OPS-1' } };
   assert.equal(restarted.create('primary', reordered).request.id, created.id);
   assert.throws(() => restarted.create('primary', { ...original, details: [{ label: 'Target', value: 'production' }] }), { code: 'idempotency_conflict' });
@@ -159,7 +159,8 @@ test('all v1 routes require a valid key while health stays public', async () => 
   const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
   const routes: Array<['GET' | 'POST', string]> = [
     ['POST', '/v1/requests'], ['GET', '/v1/requests'], ['GET', `/v1/requests/${id}`], ['GET', `/v1/requests/${id}/events`],
-    ['POST', '/v1/client-keys'], ['GET', '/v1/client-keys'], ['POST', '/v1/client-keys/123e4567-e89b-42d3-a456-426614174000/revoke'],
+    ['POST', '/v1/client-keys'], ['GET', '/v1/client-keys'], ['GET', '/v1/audit-events'],
+    ['POST', '/v1/client-keys/123e4567-e89b-42d3-a456-426614174000/revoke'],
     ['POST', `/v1/requests/${id}/cancel`], ['POST', `/v1/requests/${id}/claim`],
     ['POST', `/v1/requests/${id}/result`],
   ];
@@ -270,8 +271,8 @@ test('every issued-key request scope authorizes only its intended operation', as
   await app.close();
 });
 
-test('client key creation validates labels, scopes, and cursor without echoing submitted secrets', async () => {
-  const { core } = setup();
+test('client key creation validates labels, scopes, expiry, and cursor without echoing submitted secrets', async () => {
+  const { core, clock } = setup();
   const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
   const headers = { authorization: `Bearer ${'a'.repeat(32)}` };
   for (const body of [
@@ -279,6 +280,10 @@ test('client key creation validates labels, scopes, and cursor without echoing s
     { label: 'bad\nlabel', scopes: ['requests:read'] }, { label: 'Bad', scopes: [] },
     { label: 'Bad', scopes: ['requests:read', 'requests:read'] }, { label: 'Bad', scopes: ['keys:manage'] },
     { label: 'Bad', scopes: ['requests:read'], clientId: 'secondary' },
+    { label: 'Bad', scopes: ['requests:read'], expiresAt: clock().toISOString() },
+    { label: 'Bad', scopes: ['requests:read'], expiresAt: '2026-02-30T12:00:00.000Z' },
+    { label: 'Bad', scopes: ['requests:read'], expiresAt: '2026-09-24T14:00:00+02:00' },
+    { label: 'Bad', scopes: ['requests:read'], expiresAt: '2026-09-24T12:01:00.0001Z' },
   ]) {
     const response = await app.inject({ method: 'POST', url: '/v1/client-keys', headers, payload: body });
     assert.equal(response.statusCode, 400);
@@ -286,7 +291,91 @@ test('client key creation validates labels, scopes, and cursor without echoing s
   }
   for (const query of ['limit=0', 'limit=101', 'cursor=broken', 'extra=value'])
     assert.equal((await app.inject({ method: 'GET', url: `/v1/client-keys?${query}`, headers })).statusCode, 400, query);
+  for (const query of ['limit=0', 'limit=101', 'cursor=broken', 'requestId=bad', 'keyId=bad', 'extra=value'])
+    assert.equal((await app.inject({ method: 'GET', url: `/v1/audit-events?${query}`, headers })).statusCode, 400, query);
   await app.close();
+});
+
+test('issued-key expiry and audit attribute successful actions without storing credentials', async () => {
+  const { core, db, advance, clock, path } = setup();
+  const keys = new Map([['primary', 'a'.repeat(32)], ['secondary', 'b'.repeat(32)]]);
+  const app = createHttpServer(core, keys, () => true);
+  const bootstrap = { authorization: `Bearer ${keys.get('primary')}` };
+  const expiry = new Date(clock().getTime() + 60_000).toISOString();
+  const issue = await app.inject({ method: 'POST', url: '/v1/client-keys', headers: bootstrap,
+    payload: { label: 'Worker', scopes: ['requests:create', 'requests:claim', 'requests:result'], expiresAt: expiry } });
+  assert.equal(issue.statusCode, 201);
+  const issued = issue.json();
+  assert.equal(issued.expiresAt, expiry);
+  const scoped = { authorization: `Bearer ${issued.key as string}` };
+  const request = (await app.inject({ method: 'POST', url: '/v1/requests', headers: scoped, payload: input('audit:one') })).json();
+  assert.equal(request.clientId, 'primary');
+  assert.equal((await app.inject({ method: 'POST', url: '/v1/requests', headers: scoped, payload: input('audit:one') })).statusCode, 200);
+  const job = core.dueDeliveries().find((item) => item.id === request.id)!;
+  core.deliverySucceeded(request.id, '-100', '101');
+  core.decide(job.callbackRef, '-100', '101', '7', 'approved');
+  const claim = (await app.inject({ method: 'POST', url: `/v1/requests/${request.id}/claim`, headers: scoped, payload: {} })).json();
+  assert.equal(claim.request.executionStatus, 'claimed');
+  const result = await app.inject({ method: 'POST', url: `/v1/requests/${request.id}/result`, headers: scoped,
+    payload: { claimToken: claim.claimToken, status: 'succeeded', summary: 'Done' } });
+  assert.equal(result.statusCode, 200);
+  assert.equal((await app.inject({ method: 'GET', url: '/v1/audit-events', headers: scoped })).statusCode, 403);
+  const revoke = await app.inject({ method: 'POST', url: `/v1/client-keys/${issued.id}/revoke`, headers: bootstrap, payload: {} });
+  assert.equal(revoke.statusCode, 200);
+  assert.equal((await app.inject({ method: 'POST', url: `/v1/client-keys/${issued.id}/revoke`, headers: bootstrap, payload: {} })).statusCode, 200);
+  const audit = (await app.inject({ method: 'GET', url: '/v1/audit-events', headers: bootstrap })).json();
+  assert.deepEqual(audit.items.map((event: { type: string }) => event.type),
+    ['key.revoked', 'execution.succeeded', 'execution.claimed', 'request.created', 'key.issued']);
+  assert.deepEqual(audit.items.map((event: { actorKeyId: string | null }) => event.actorKeyId),
+    [null, issued.id, issued.id, issued.id, null]);
+  assert.equal(audit.items[0].subjectKeyId, issued.id);
+  assert.equal(audit.items[4].subjectKeyId, issued.id);
+  assert.deepEqual((await app.inject({ method: 'GET', url: `/v1/audit-events?requestId=${request.id}`, headers: bootstrap })).json()
+    .items.map((event: { type: string }) => event.type), ['execution.succeeded', 'execution.claimed', 'request.created']);
+  assert.deepEqual((await app.inject({ method: 'GET', url: `/v1/audit-events?keyId=${issued.id}`, headers: bootstrap })).json()
+    .items.map((event: { type: string }) => event.type), audit.items.map((event: { type: string }) => event.type));
+  const page = (await app.inject({ method: 'GET', url: '/v1/audit-events?limit=2', headers: bootstrap })).json();
+  assert.equal(page.items.length, 2);
+  assert.equal((await app.inject({ method: 'GET', url: `/v1/audit-events?limit=2&cursor=${page.nextCursor}`, headers: bootstrap })).json().items.length, 2);
+  const other = core.create('secondary', input('audit:other')).request;
+  assert.deepEqual((await app.inject({ method: 'GET', url: '/v1/audit-events', headers: { authorization: `Bearer ${keys.get('secondary')}` } })).json()
+    .items.map((event: { requestId: string }) => event.requestId), [other.id]);
+  assert.deepEqual((await app.inject({ method: 'GET', url: `/v1/audit-events?keyId=${issued.id}`, headers: { authorization: `Bearer ${keys.get('secondary')}` } })).json().items, []);
+  assert.doesNotMatch(JSON.stringify(audit), new RegExp(issued.key));
+  assert.doesNotMatch(JSON.stringify(audit), new RegExp(claim.claimToken));
+  assert.doesNotMatch(JSON.stringify(db.prepare('SELECT * FROM audit_events').all()), new RegExp(issued.key));
+  assert.doesNotMatch(JSON.stringify(db.prepare('SELECT * FROM audit_events').all()), new RegExp(claim.claimToken));
+  await app.close();
+  db.close();
+  const reopened = openDatabase(path); dbs.push(reopened);
+  const restartedCore = new GatewayCore(reopened, clock);
+  const restarted = createHttpServer(restartedCore, keys, () => true);
+  assert.equal((await restarted.inject({ method: 'GET', url: '/v1/audit-events', headers: bootstrap })).json().items.length, 5);
+  await restarted.close();
+  const noExpiry = restartedCore.issueClientKey('primary', 'Permanent', ['requests:read']);
+  assert.equal(noExpiry.expiresAt, null);
+  const expiring = restartedCore.issueClientKey('primary', 'Temporary', ['requests:read'], new Date(clock().getTime() + 1000).toISOString());
+  advance(1000);
+  const after = createHttpServer(new GatewayCore(reopened, clock), keys, () => true);
+  assert.equal((await after.inject({ method: 'GET', url: '/v1/requests', headers: { authorization: `Bearer ${expiring.key}` } })).statusCode, 401);
+  assert.equal((await after.inject({ method: 'GET', url: '/v1/requests', headers: { authorization: `Bearer ${noExpiry.key}` } })).statusCode, 200);
+  await after.close();
+});
+
+test('migration adds audit and nullable expiry to an existing issued-key database', () => {
+  const { db, path, core, clock } = setup();
+  const existing = core.issueClientKey('primary', 'Existing reader', ['requests:read']);
+  db.exec('DROP TABLE audit_events');
+  db.exec('ALTER TABLE client_keys DROP COLUMN expires_at');
+  db.prepare("DELETE FROM schema_migrations WHERE version = '006_key_expiry_audit.sql'").run();
+  db.close();
+  const reopened = openDatabase(path); dbs.push(reopened);
+  const upgraded = new GatewayCore(reopened, clock);
+  assert.equal(upgraded.authenticateClientKey(existing.key)?.id, existing.id);
+  assert.equal(upgraded.listClientKeys('primary', { limit: 20 }).items[0]?.expiresAt, null);
+  assert.deepEqual(upgraded.listAuditEvents('primary', { limit: 20 }).items, []);
+  upgraded.revokeClientKey('primary', existing.id);
+  assert.deepEqual(upgraded.listAuditEvents('primary', { limit: 20 }).items.map((event) => event.type), ['key.revoked']);
 });
 
 test('listing is owner scoped, filtered, ordered, paginated, and reflects expiry', async () => {
@@ -454,6 +543,16 @@ test('a failed event write rolls back the request state change', () => {
   assert.deepEqual(core.events('primary', request.id, {}).items.map((event) => event.type), ['request.created']);
   db.exec('DROP TRIGGER block_events');
   assert.equal(core.cancel('primary', request.id).status, 'cancelled');
+});
+
+test('an audit write failure rolls back key issuance and request creation', () => {
+  const { db, core } = setup();
+  db.exec("CREATE TRIGGER block_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT, 'blocked audit'); END");
+  assert.throws(() => core.issueClientKey('primary', 'Worker', ['requests:create']), /blocked audit/);
+  assert.equal((db.prepare('SELECT COUNT(*) AS count FROM client_keys').get() as { count: number }).count, 0);
+  assert.throws(() => core.create('primary', input('audit:atomic')), /blocked audit/);
+  assert.equal((db.prepare('SELECT COUNT(*) AS count FROM requests').get() as { count: number }).count, 0);
+  assert.equal((db.prepare('SELECT COUNT(*) AS count FROM request_events').get() as { count: number }).count, 0);
 });
 
 test('HTTP state errors, cancellation, and result token checks have stable responses', async () => {
@@ -683,6 +782,8 @@ test('client methods complete a failed execution and preserve API errors', async
   assert.equal(final.executionStatus, 'failed');
   assert.equal(final.resultSummary, 'Target unavailable');
   assert.equal((await client.getRequest(request.id)).executionStatus, 'failed');
+  assert.deepEqual((await client.listAuditEvents({ requestId: request.id })).items.map((event) => event.type),
+    ['execution.failed', 'execution.claimed', 'request.created']);
   const firstEvents = await client.getRequestEvents(request.id, { limit: 2 });
   assert.deepEqual(firstEvents.items.map((event) => event.type), ['request.created', 'delivery.delivered']);
   assert.equal(typeof firstEvents.nextCursor, 'string');
@@ -697,6 +798,7 @@ test('client methods complete a failed execution and preserve API errors', async
   await assert.rejects(reader.createRequest({ idempotencyKey: 'sdk:denied', action: 'maintenance', title: 'Denied',
     description: 'No work', expiresInSeconds: 60 }), { status: 403, code: 'insufficient_scope' });
   assert.deepEqual((await client.listClientKeys()).items.map((item) => item.id), [issued.id]);
+  assert.deepEqual((await client.listAuditEvents({ keyId: issued.id })).items.map((event) => event.type), ['key.issued']);
   assert.equal((await client.revokeClientKey(issued.id)).revokedAt === null, false);
   await assert.rejects(reader.getRequest(request.id), { status: 401, code: 'unauthorized' });
   await app.close();

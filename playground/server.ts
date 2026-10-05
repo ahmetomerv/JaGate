@@ -15,7 +15,7 @@ const modeSchema = z.enum(['simulated', 'live']);
 const commandSchema = z.object({
   mode: modeSchema,
   clientId: z.string().min(1).max(32),
-  operation: z.enum(['create', 'list', 'get', 'events', 'cancel', 'claim', 'result', 'keyCreate', 'keyList', 'keyRevoke', 'health', 'ready']),
+  operation: z.enum(['create', 'list', 'get', 'events', 'cancel', 'claim', 'result', 'keyCreate', 'keyList', 'keyRevoke', 'audit', 'health', 'ready']),
   auth: z.enum(['valid', 'scoped', 'missing', 'invalid']).default('valid'),
   scopedKey: z.string().max(128).optional(),
   requestId: z.string().max(128).optional(),
@@ -31,6 +31,8 @@ const commandSchema = z.object({
   }).strict().optional(),
   eventPage: z.object({ limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(15).optional() }).strict().optional(),
   keyPage: z.object({ limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(256).optional() }).strict().optional(),
+  auditPage: z.object({ limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(15).optional(),
+    requestId: idSchema.optional(), keyId: idSchema.optional() }).strict().optional(),
   payload: z.unknown().optional(),
 }).strict();
 
@@ -96,7 +98,7 @@ export function createPlayground(options: PlaygroundOptions) {
   app.post('/api/execute', async (request, reply) => {
     const parsed = commandSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid playground command' });
-    const { mode, clientId, operation, auth, scopedKey, requestId, keyId, filters, eventPage, keyPage, payload } = parsed.data;
+    const { mode, clientId, operation, auth, scopedKey, requestId, keyId, filters, eventPage, keyPage, auditPage, payload } = parsed.data;
     if (mode === 'simulated' ? !clientSchema.safeParse(clientId).success : !liveKeys?.has(clientId))
       return reply.code(400).send({ error: 'Unknown client for this mode' });
     if (['get', 'events', 'cancel', 'claim', 'result'].includes(operation) && !requestId)
@@ -105,6 +107,7 @@ export function createPlayground(options: PlaygroundOptions) {
     if (auth === 'scoped' && !scopedKey) return reply.code(400).send({ error: 'Enter an issued client key' });
     const path = operation === 'health' || operation === 'ready' ? `/${operation}`
       : operation === 'create' || operation === 'list' ? '/v1/requests'
+        : operation === 'audit' ? '/v1/audit-events'
         : operation === 'keyCreate' || operation === 'keyList' ? '/v1/client-keys'
           : operation === 'keyRevoke' ? `/v1/client-keys/${encodeURIComponent(keyId!)}/revoke`
         : `/v1/requests/${encodeURIComponent(requestId!)}` + (operation === 'get' ? '' : `/${operation}`);
@@ -112,8 +115,9 @@ export function createPlayground(options: PlaygroundOptions) {
     if (operation === 'list' && filters) for (const [key, value] of Object.entries(filters)) if (value !== undefined && value !== '') query.set(key, String(value));
     if (operation === 'events' && eventPage) for (const [key, value] of Object.entries(eventPage)) if (value !== undefined && value !== '') query.set(key, String(value));
     if (operation === 'keyList' && keyPage) for (const [key, value] of Object.entries(keyPage)) if (value !== undefined && value !== '') query.set(key, String(value));
+    if (operation === 'audit' && auditPage) for (const [key, value] of Object.entries(auditPage)) if (value !== undefined && value !== '') query.set(key, String(value));
     const url = `${path}${query.size ? `?${query}` : ''}`;
-    const method = ['list', 'get', 'events', 'keyList', 'health', 'ready'].includes(operation) ? 'GET' : 'POST';
+    const method = ['list', 'get', 'events', 'keyList', 'audit', 'health', 'ready'].includes(operation) ? 'GET' : 'POST';
     const key = mode === 'simulated' ? simulatedKeys.get(clientId as ClientId)! : liveKeys!.get(clientId)!;
     const authorization = auth === 'missing' ? undefined : `Bearer ${auth === 'invalid' ? 'invalid-playground-key' : auth === 'scoped' ? scopedKey : key}`;
     const headers = { ...(authorization ? { authorization } : {}), ...(method === 'POST' ? { 'content-type': 'application/json' } : {}) };

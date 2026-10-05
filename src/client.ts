@@ -1,7 +1,8 @@
-import type { ClientKeyView, CreateClientKeyInput, CreateRequestInput, IssuedClientKey, ListClientKeysPage, ListClientKeysQuery, ListRequestsPage, ListRequestsQuery, RequestEventsPage, RequestEventsQuery, RequestView } from './model.js';
+import type { ClientKeyView, CreateClientKeyInput, CreateRequestInput, IssuedClientKey, ListAuditEventsPage, ListAuditEventsQuery, ListClientKeysPage, ListClientKeysQuery, ListRequestsPage, ListRequestsQuery, RequestEventsPage, RequestEventsQuery, RequestView } from './model.js';
 
 export type { CreateRequestInput, ListRequestsPage, ListRequestsQuery, RequestEvent, RequestEventType, RequestEventsPage, RequestEventsQuery, RequestView } from './model.js';
 export type { ClientKeyScope, ClientKeyView, CreateClientKeyInput, IssuedClientKey, ListClientKeysPage, ListClientKeysQuery } from './model.js';
+export type { AuditEvent, AuditEventType, ListAuditEventsPage, ListAuditEventsQuery } from './model.js';
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) { super(message); }
 }
@@ -49,6 +50,15 @@ export class ApprovalClient {
     if (query.cursor) params.set('cursor', query.cursor);
     const search = params.toString();
     return this.call(`/v1/client-keys${search ? `?${search}` : ''}`, 'GET', undefined, signal);
+  }
+  listAuditEvents(query: ListAuditEventsQuery = {}, signal?: AbortSignal): Promise<ListAuditEventsPage> {
+    const params = new URLSearchParams();
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    if (query.cursor) params.set('cursor', query.cursor);
+    if (query.requestId) params.set('requestId', query.requestId);
+    if (query.keyId) params.set('keyId', query.keyId);
+    const search = params.toString();
+    return this.call(`/v1/audit-events${search ? `?${search}` : ''}`, 'GET', undefined, signal);
   }
   revokeClientKey(id: string, signal?: AbortSignal): Promise<ClientKeyView> {
     return this.call(`/v1/client-keys/${encodeURIComponent(id)}/revoke`, 'POST', {}, signal);

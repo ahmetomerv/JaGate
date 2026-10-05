@@ -79,9 +79,10 @@ The calling app owns the action and its credentials. It should execute the exact
 | `cancel(id, signal?)` | Cancel a still-pending request. |
 | `claim(id, signal?)` | Atomically claim an approved, unclaimed request. |
 | `reportResult(id, { claimToken, status, summary }, signal?)` | Record a claimant-reported outcome. |
-| `createClientKey({ label, scopes }, signal?)` | Use a bootstrap key to issue a scoped key; returns the raw key once. |
+| `createClientKey({ label, scopes, expiresAt? }, signal?)` | Use a bootstrap key to issue a scoped key with optional UTC expiry; returns the raw key once. |
 | `listClientKeys({ limit, cursor }?, signal?)` | Use a bootstrap key to list issued-key metadata without secrets. |
 | `revokeClientKey(id, signal?)` | Use a bootstrap key to revoke an issued key immediately. |
+| `listAuditEvents({ limit, cursor, requestId, keyId }?, signal?)` | Use a bootstrap key to read this client's attribution events, newest first. |
 
 To inspect requests without creating or acting on them, issue a separate key with only `requests:read` and construct an `ApprovalClient` with that key. The same client ID can list its requests and inspect an individual request's events:
 
@@ -114,6 +115,26 @@ const expiring = await reader.listRequests({ status: 'pending', expiresBefore: e
 ```
 
 Read-only monitoring can flag these requests. It must not assume an old claim means the caller's action failed; check the target system before any follow-up. See [Requests needing attention](/API#requests-needing-attention).
+
+For a time-limited worker, issue an expiring key with a bootstrap-key client. The expiration is checked on every request. Keep a separate bootstrap key for administration and audit reads:
+
+```ts
+const admin = new ApprovalClient({
+  baseUrl: process.env.JAGATE_URL ?? 'http://127.0.0.1:3080',
+  apiKey: process.env.JAGATE_BOOTSTRAP_KEY!,
+});
+const expiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+const worker = await admin.createClientKey({
+  label: 'Deployment worker',
+  scopes: ['requests:create', 'requests:read', 'requests:claim', 'requests:result'],
+  expiresAt,
+});
+// Save worker.key securely now; listClientKeys only returns its ID and metadata.
+const audit = await admin.listAuditEvents({ keyId: worker.id, limit: 20 });
+console.log(audit.items.map(({ type, actorKeyId, requestId }) => ({ type, actorKeyId, requestId })));
+```
+
+The audit feed records only key IDs for successful creates, claims, reports, issuances, and revocations. It does not contain key secrets or claim tokens. See [Client audit events](/API#client-audit-events) for the event shape and filters.
 
 `waitForDecision` supports `AbortSignal`. `WaitTimeoutError` means only that the local wait ended; it does **not** mean the approval expired. A real server-side expiry is returned as `status: 'expired'`. Non-success HTTP responses throw `ApiError` with `status` and `code` fields. Keep the claim token until result reporting succeeds. If the process crashes after a claim, reconcile the external action before requesting a new approval.
 

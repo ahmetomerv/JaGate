@@ -159,6 +159,40 @@ test('playground issues and revokes scoped keys through simulated HTTP routes', 
   assert.equal((await call(app, session, '/api/execute', command('list', { auth: 'scoped', scopedKey }))).json().status, 401);
 });
 
+test('playground can inspect key expiry and client audit records in simulation', async () => {
+  const { app } = setup();
+  const boot = (await app.inject({ method: 'GET', url: '/api/bootstrap' })).json() as { token: string; simulatedNow: string };
+  const expiresAt = new Date(Date.parse(boot.simulatedNow) + 60_000).toISOString();
+  const issued = (await call(app, boot.token, '/api/execute', command('keyCreate', {
+    payload: { label: 'Temporary creator', scopes: ['requests:create'], expiresAt },
+  }))).json();
+  assert.equal(issued.status, 201);
+  assert.equal(issued.body.expiresAt, expiresAt);
+  const scopedKey = issued.body.key as string;
+  const created = (await call(app, boot.token, '/api/execute', command('create', {
+    auth: 'scoped', scopedKey, payload: input('playground:audit'),
+  }))).json();
+  assert.equal(created.status, 201);
+  const audit = (await call(app, boot.token, '/api/execute', command('audit', {
+    auditPage: { keyId: issued.body.id, limit: 1 },
+  }))).json();
+  assert.equal(audit.status, 200);
+  assert.equal(audit.body.items[0].type, 'request.created');
+  assert.equal(audit.body.items[0].actorKeyId, issued.body.id);
+  assert.ok(audit.body.nextCursor);
+  const older = (await call(app, boot.token, '/api/execute', command('audit', {
+    auditPage: { keyId: issued.body.id, limit: 1, cursor: audit.body.nextCursor },
+  }))).json();
+  assert.equal(older.body.items[0].type, 'key.issued');
+  assert.deepEqual((await call(app, boot.token, '/api/execute', command('audit', { clientId: 'backups' }))).json().body.items, []);
+  assert.equal((await call(app, boot.token, '/api/execute', command('audit', { auth: 'scoped', scopedKey }))).json().status, 403);
+  assert.doesNotMatch(JSON.stringify(audit), new RegExp(scopedKey));
+  assert.equal((await call(app, boot.token, '/api/advance-time', { seconds: 60 })).json().expired >= 0, true);
+  assert.equal((await call(app, boot.token, '/api/execute', command('create', {
+    auth: 'scoped', scopedKey, payload: input('playground:expired-key'),
+  }))).json().status, 401);
+});
+
 test('live mode keeps client keys in the backend while calling the real HTTP routes', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'jagate-playground-live-'));
   dirs.push(dir);

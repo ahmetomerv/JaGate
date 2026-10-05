@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Db } from './storage.js';
 import { GatewayError } from './errors.js';
-import { canonicalContent, hash, type ClientKeyScope, type ClientKeyView, type CreateInput, type DecisionStatus, type IssuedClientKey, type ListClientKeysPage, type ListRequestsPage, type ListRequestsQuery, type RequestEvent, type RequestEventType, type RequestEventsPage, type RequestView } from './model.js';
+import { canonicalContent, hash, type AuditEvent, type AuditEventType, type ClientKeyScope, type ClientKeyView, type CreateInput, type DecisionStatus, type IssuedClientKey, type ListAuditEventsPage, type ListClientKeysPage, type ListRequestsPage, type ListRequestsQuery, type RequestEvent, type RequestEventType, type RequestEventsPage, type RequestView } from './model.js';
 
 type Row = {
   id: string; client_id: string; idempotency_key: string; fingerprint: string; action: string; title: string;
@@ -14,7 +14,9 @@ type Row = {
   callback_ref: string; delivery_message_id: string | null; delivery_chat_id: string | null;
 };
 
-type ClientKeyRow = { id: string; client_id: string; label: string; key_hash: string; scopes_json: string; created_at: string; revoked_at: string | null };
+type ClientKeyRow = { id: string; client_id: string; label: string; key_hash: string; scopes_json: string; created_at: string; expires_at: string | null; revoked_at: string | null };
+type AuditRow = { id: number; type: AuditEventType; occurred_at: string; actor: AuditEvent['actor']; actor_key_id: string | null;
+  request_id: string | null; subject_key_id: string | null };
 
 export type DeliveryJob = { id: string; callbackRef: string; view: RequestView; attempts: number };
 
@@ -25,22 +27,48 @@ export class GatewayCore {
   private row(id: string): Row | undefined { return this.db.prepare('SELECT * FROM requests WHERE id = ?').get(id) as Row | undefined; }
   private keyView(row: ClientKeyRow): ClientKeyView {
     return { id: row.id, clientId: row.client_id, label: row.label, scopes: JSON.parse(row.scopes_json) as ClientKeyScope[],
-      createdAt: row.created_at, revokedAt: row.revoked_at };
+      createdAt: row.created_at, expiresAt: row.expires_at, revokedAt: row.revoked_at };
   }
 
-  authenticateClientKey(key: string): { clientId: string; scopes: ClientKeyScope[] } | undefined {
-    const row = this.db.prepare('SELECT * FROM client_keys WHERE key_hash = ? AND revoked_at IS NULL')
-      .get(hash(key)) as ClientKeyRow | undefined;
-    return row ? { clientId: row.client_id, scopes: this.keyView(row).scopes } : undefined;
+  private appendAudit(clientId: string, type: AuditEventType, actorKeyId: string | null,
+    requestId: string | null = null, subjectKeyId: string | null = null): void {
+    this.db.prepare(`INSERT INTO audit_events(client_id,type,occurred_at,actor,actor_key_id,request_id,subject_key_id)
+      VALUES (?,?,?,?,?,?,?)`).run(clientId, type, this.iso(), actorKeyId === null ? 'bootstrap' : 'issued_key',
+      actorKeyId, requestId, subjectKeyId);
   }
 
-  issueClientKey(clientId: string, label: string, scopes: ClientKeyScope[]): IssuedClientKey {
+  listAuditEvents(clientId: string, options: { limit: number; before?: number; requestId?: string; keyId?: string }): ListAuditEventsPage {
+    const conditions = ['client_id = ?'];
+    const values: Array<string | number> = [clientId];
+    if (options.before !== undefined) { conditions.push('id < ?'); values.push(options.before); }
+    if (options.requestId) { conditions.push('request_id = ?'); values.push(options.requestId); }
+    if (options.keyId) { conditions.push('(actor_key_id = ? OR subject_key_id = ?)'); values.push(options.keyId, options.keyId); }
+    const rows = this.db.prepare(`SELECT id,type,occurred_at,actor,actor_key_id,request_id,subject_key_id
+      FROM audit_events WHERE ${conditions.join(' AND ')} ORDER BY id DESC LIMIT ?`)
+      .all(...values, options.limit + 1) as AuditRow[];
+    const page = rows.slice(0, options.limit);
+    return { items: page.map((row) => ({ id: row.id, type: row.type, occurredAt: row.occurred_at, actor: row.actor,
+      actorKeyId: row.actor_key_id, requestId: row.request_id, subjectKeyId: row.subject_key_id })),
+    nextCursor: rows.length > options.limit ? String(page.at(-1)!.id) : null };
+  }
+
+  authenticateClientKey(key: string): { id: string; clientId: string; scopes: ClientKeyScope[] } | undefined {
+    const row = this.db.prepare('SELECT * FROM client_keys WHERE key_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)')
+      .get(hash(key), this.iso()) as ClientKeyRow | undefined;
+    return row ? { id: row.id, clientId: row.client_id, scopes: this.keyView(row).scopes } : undefined;
+  }
+
+  issueClientKey(clientId: string, label: string, scopes: ClientKeyScope[], expiresAt?: string): IssuedClientKey {
     const id = randomUUID();
     const key = `jgk_${randomBytes(32).toString('base64url')}`;
     const now = this.iso();
-    this.db.prepare('INSERT INTO client_keys(id,client_id,label,key_hash,scopes_json,created_at) VALUES (?,?,?,?,?,?)')
-      .run(id, clientId, label, hash(key), JSON.stringify(scopes), now);
-    return { id, clientId, label, scopes, createdAt: now, revokedAt: null, key };
+    if (expiresAt !== undefined && expiresAt <= now) throw new GatewayError('invalid_input', 400, 'key expiry must be in the future');
+    return this.db.transaction(() => {
+      this.db.prepare('INSERT INTO client_keys(id,client_id,label,key_hash,scopes_json,created_at,expires_at) VALUES (?,?,?,?,?,?,?)')
+        .run(id, clientId, label, hash(key), JSON.stringify(scopes), now, expiresAt ?? null);
+      this.appendAudit(clientId, 'key.issued', null, null, id);
+      return { id, clientId, label, scopes, createdAt: now, expiresAt: expiresAt ?? null, revokedAt: null, key };
+    })();
   }
 
   listClientKeys(clientId: string, options: { limit: number; before?: { createdAt: string; id: string } }): ListClientKeysPage {
@@ -57,11 +85,14 @@ export class GatewayCore {
   }
 
   revokeClientKey(clientId: string, id: string): ClientKeyView {
-    this.db.prepare('UPDATE client_keys SET revoked_at = ? WHERE id = ? AND client_id = ? AND revoked_at IS NULL')
-      .run(this.iso(), id, clientId);
-    const row = this.db.prepare('SELECT * FROM client_keys WHERE id = ? AND client_id = ?').get(id, clientId) as ClientKeyRow | undefined;
-    if (!row) throw new GatewayError('not_found', 404, 'client key not found');
-    return this.keyView(row);
+    return this.db.transaction(() => {
+      const changed = this.db.prepare('UPDATE client_keys SET revoked_at = ? WHERE id = ? AND client_id = ? AND revoked_at IS NULL')
+        .run(this.iso(), id, clientId).changes;
+      const row = this.db.prepare('SELECT * FROM client_keys WHERE id = ? AND client_id = ?').get(id, clientId) as ClientKeyRow | undefined;
+      if (!row) throw new GatewayError('not_found', 404, 'client key not found');
+      if (changed) this.appendAudit(clientId, 'key.revoked', null, null, id);
+      return this.keyView(row);
+    })();
   }
   private appendEvent(id: string, type: RequestEventType, occurredAt: string, actorId: string | null = null, attempt: number | null = null): void {
     this.db.prepare(`INSERT INTO request_events(request_id, sequence, type, occurred_at, actor_id, attempt)
@@ -90,7 +121,7 @@ export class GatewayCore {
     })();
   }
 
-  create(clientId: string, input: CreateInput): { request: RequestView; created: boolean } {
+  create(clientId: string, input: CreateInput, actorKeyId: string | null = null): { request: RequestView; created: boolean } {
     const content = canonicalContent(input);
     const fingerprint = hash(content);
     return this.db.transaction(() => {
@@ -109,6 +140,7 @@ export class GatewayCore {
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending','unclaimed','pending',?,?)`)
         .run(id,clientId,input.idempotencyKey,fingerprint,content,input.action,input.title,input.description,JSON.stringify(input.details),JSON.stringify(input.metadata),createdAt,expiresAt,createdAt,ref);
       this.appendEvent(id, 'request.created', createdAt);
+      this.appendAudit(clientId, 'request.created', actorKeyId, id);
       return { request: this.view(this.row(id)!), created: true };
     })();
   }
@@ -194,7 +226,7 @@ export class GatewayCore {
     })();
   }
 
-  claim(clientId: string, id: string): { claimId: string; claimToken: string; request: RequestView } {
+  claim(clientId: string, id: string, actorKeyId: string | null = null): { claimId: string; claimToken: string; request: RequestView } {
     this.expire();
     const claimId = randomUUID();
     const claimToken = randomBytes(32).toString('base64url');
@@ -205,11 +237,12 @@ export class GatewayCore {
         .run(now, claimId, hash(claimToken), id, clientId).changes;
       if (!changed) { this.get(clientId, id); throw new GatewayError('not_claimable', 409, 'request is not approved and unclaimed'); }
       this.appendEvent(id, 'execution.claimed', now);
+      this.appendAudit(clientId, 'execution.claimed', actorKeyId, id);
       return { claimId, claimToken, request: this.get(clientId, id) };
     })();
   }
 
-  report(clientId: string, id: string, token: string, status: 'succeeded' | 'failed', summary: string): RequestView {
+  report(clientId: string, id: string, token: string, status: 'succeeded' | 'failed', summary: string, actorKeyId: string | null = null): RequestView {
     const row = this.db.prepare('SELECT * FROM requests WHERE id = ? AND client_id = ?').get(id, clientId) as Row | undefined;
     if (!row) throw new GatewayError('not_found', 404, 'request not found');
     const candidate = Buffer.from(hash(token), 'hex');
@@ -222,6 +255,7 @@ export class GatewayCore {
         .run(status, summary, now, id, clientId, row.claim_token_hash).changes;
       if (!changed) throw new GatewayError('invalid_state', 409, 'result already reported');
       this.appendEvent(id, `execution.${status}`, now);
+      this.appendAudit(clientId, `execution.${status}`, actorKeyId, id);
       return this.get(clientId, id);
     })();
   }
