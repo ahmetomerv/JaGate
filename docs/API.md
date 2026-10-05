@@ -16,7 +16,7 @@ Create an issued key with `POST /v1/client-keys` using the bootstrap key. In thi
 curl -sS -X POST http://127.0.0.1:3080/v1/client-keys \
   -H "Authorization: Bearer $JAGATE_CLIENT_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"label":"Website approval worker","scopes":["requests:create","requests:read"]}'
+  -d '{"label":"Website approval worker","scopes":["requests:create","requests:read","requests:claim","requests:result"]}'
 ```
 
 The response is HTTP 201 and includes `id`, `clientId`, `label`, `scopes`, `createdAt`, `revokedAt: null`, and the generated `key`. **The raw `key` is returned only on creation.** Store it privately; listing or revoking a key never returns it. Labels are 1–80 characters after trimming, without control characters. `scopes` must be a nonempty, duplicate-free array of these values:
@@ -30,6 +30,8 @@ The response is HTTP 201 and includes `id`, `clientId`, `label`, `scopes`, `crea
 | `requests:result` | `POST /v1/requests/:id/result` |
 
 Scopes authorize routes; normal request state checks and the one-time claim token still apply. An issued key cannot create, list, or revoke client keys. A missing or revoked key returns 401 `unauthorized`; a valid key lacking a route's scope returns 403 `insufficient_scope`. A key from another client still gets 404 `not_found` for a request or issued-key ID it does not own. Issued keys work only while their client ID remains configured in `CLIENT_KEYS`.
+
+The example worker can create a request, read its decision, claim an approval, and report an outcome. Give a monitoring tool only `requests:read` to let it list requests and view timelines. Add `requests:cancel` only if a caller must cancel pending requests. A key with `requests:create` alone cannot poll a decision; `requests:result` alone cannot claim one.
 
 `GET /v1/client-keys?limit=20` lists this client's issued keys newest first, including revoked keys. It returns `{ "items": [/* key metadata, never raw keys */], "nextCursor": null }`. `limit` is 1–100 (default 20); pass a non-null `nextCursor` as `cursor` with the same limit for later pages. Revoke with `POST /v1/client-keys/:id/revoke` and `{}`. The response is the key metadata with `revokedAt`; repeated revocation returns the same metadata. Revocation blocks the next request immediately and persists across restarts. Neither action affects requests already owned by the client.
 

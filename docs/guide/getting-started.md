@@ -81,4 +81,6 @@ The demo prints a request ID and waits for a Telegram decision. Tap **Approve** 
 
 When you are done, press Ctrl+C in terminal 1. The SQLite file remains in `data/`, so requests and decisions survive a restart. Do not start a second JaGate process with the same bot token.
 
+JaGate applies numbered SQL migrations, including request listing, timelines, and issued keys, automatically when it opens the database. You do not need to run the migration files manually.
+
 Next: try the [HTTP API](/API) directly, use the [TypeScript client](/guide/typescript), or run with [Docker Compose](/guide/docker).

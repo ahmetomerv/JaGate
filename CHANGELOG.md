@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added client-scoped request listing with decision, delivery, and execution status filters and cursor pagination.
+- Added an owner-scoped, paginated event timeline for each request, with atomic records of gateway state changes.
+- Added hashed, scoped, revocable issued client keys. Configured bootstrap keys manage them; the raw issued key is returned only at creation.
 - Added a distinct Telegram destination and approver allowlist per client while keeping one bot and long poller. Startup verifies every destination, and callbacks require the client's chat, allowlisted user, and recorded message.
 - Added migration `002_delivery_chat.sql`. Pending delivered requests are requeued with new buttons after a destination change or when upgrading from the earlier schema; settled decisions remain unchanged.
 

@@ -37,7 +37,7 @@ The HTTP API is usable from any language. The TypeScript client is a convenience
 
 ## SQLite schema at a glance
 
-The schema starts in [`migrations/001_initial.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/001_initial.sql). [`migrations/002_delivery_chat.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/002_delivery_chat.sql) adds the stored destination chat binding. [`migrations/004_request_events.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/004_request_events.sql) adds per-request history, and [`migrations/005_client_keys.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/005_client_keys.sql) adds issued keys. There are five tables and no user-account or workflow tables.
+The schema starts in [`migrations/001_initial.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/001_initial.sql). [`migrations/002_delivery_chat.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/002_delivery_chat.sql) adds the stored destination chat binding. [`migrations/003_request_listing.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/003_request_listing.sql) indexes per-client request listing. [`migrations/004_request_events.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/004_request_events.sql) adds per-request history, and [`migrations/005_client_keys.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/005_client_keys.sql) adds issued keys. Numbered migrations are applied automatically when the database opens. There are five tables and no user-account or workflow tables.
 
 | Table | Main fields | Purpose |
 | --- | --- | --- |
@@ -77,4 +77,4 @@ Only `approved + unclaimed` can be claimed. Expiry applies while a request is pe
 
 ## Verification
 
-`npm test` uses temporary SQLite databases, an injected clock, a fake Telegram transport, and an injected HTTP fetcher. It covers lifecycle and expiry boundaries, restart recovery, owner-scoped idempotency and authorization, initial schema creation, API validation, Telegram authorization and callback binding, delivery retries and failure, polling offset replay, claim races, and client waiting. `npm run test:coverage` prints a source coverage report. Tests never use a real bot token or contact Telegram.
+`npm test` uses temporary SQLite databases, an injected clock, a fake Telegram transport, and an injected HTTP fetcher. It covers lifecycle and expiry boundaries, restart recovery, owner-scoped idempotency and authorization, filtered request listing and pagination, event ordering and atomic writes, scoped-key authorization and revocation, API validation, Telegram authorization and callback binding, delivery retries and failure, polling offset replay, claim races, and client waiting. `npm run test:coverage` prints a source coverage report. Tests never use a real bot token or contact Telegram.

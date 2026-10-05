@@ -13,7 +13,7 @@ npm run build
 npm install /absolute/path/to/your/checkout
 ```
 
-Point `JAGATE_URL` at a running gateway and provide **that application's own** client key as `JAGATE_CLIENT_KEY`. The server uses that key's client ID to select its Telegram destination and approver allowlist; the caller does not specify them in a request.
+Point `JAGATE_URL` at a running gateway and provide **that application's own** issued client key as `JAGATE_CLIENT_KEY`. For the full example below, issue it with `requests:create`, `requests:read`, `requests:claim`, and `requests:result`. The server uses that key's client ID to select its Telegram destination and approver allowlist; the caller does not specify them in a request. Keep the configured bootstrap key in a separate administrative environment for [key management](/API#scoped-client-keys).
 
 ```ts
 import { writeFile } from 'node:fs/promises';
@@ -82,6 +82,24 @@ The calling app owns the action and its credentials. It should execute the exact
 | `createClientKey({ label, scopes }, signal?)` | Use a bootstrap key to issue a scoped key; returns the raw key once. |
 | `listClientKeys({ limit, cursor }?, signal?)` | Use a bootstrap key to list issued-key metadata without secrets. |
 | `revokeClientKey(id, signal?)` | Use a bootstrap key to revoke an issued key immediately. |
+
+To inspect requests without creating or acting on them, issue a separate key with only `requests:read` and construct an `ApprovalClient` with that key. The same client ID can list its requests and inspect an individual request's events:
+
+```ts
+const reader = new ApprovalClient({
+  baseUrl: process.env.JAGATE_URL ?? 'http://127.0.0.1:3080',
+  apiKey: process.env.JAGATE_READ_KEY!,
+});
+const page = await reader.listRequests({ status: 'approved', limit: 20 });
+for (const request of page.items) {
+  const timeline = await reader.getRequestEvents(request.id, { limit: 50 });
+  console.log(request.id, timeline.items.map((event) => event.type));
+}
+// If page.nextCursor is non-null, pass it as cursor with the same filters and limit.
+// Do the same with timeline.nextCursor to fetch later events for a request.
+```
+
+The snippet assumes the `ApprovalClient` import from the example above and a `JAGATE_READ_KEY` environment variable containing the read-only key. Both APIs return `{ items, nextCursor }`, and a null cursor means the last page. Request pages are newest first; events for one request are oldest first. See [List and filter requests](/API#list-and-filter-requests) and [Per-request event timeline](/API#per-request-event-timeline) for filters, event fields, and pagination behavior.
 
 `waitForDecision` supports `AbortSignal`. `WaitTimeoutError` means only that the local wait ended; it does **not** mean the approval expired. A real server-side expiry is returned as `status: 'expired'`. Non-success HTTP responses throw `ApiError` with `status` and `code` fields. Keep the claim token until result reporting succeeds. If the process crashes after a claim, reconcile the external action before requesting a new approval.
 

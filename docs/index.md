@@ -18,11 +18,15 @@ hero:
 
 features:
   - title: One gateway, multiple clients
-    details: Give each application its own API key. Requests and idempotency keys are scoped to that client.
+    details: Give each application its own credentials. Requests and idempotency keys are scoped to that client.
   - title: Durable decisions
     details: SQLite stores immutable proposals, Telegram delivery state, decisions, and claims across restarts.
   - title: Caller-owned execution
     details: JaGate never runs supplied commands, URLs, or callbacks. The calling app keeps action credentials and does the work.
+  - title: Request history
+    details: Filter and page through a client's requests, then inspect the recorded state changes for one request.
+  - title: Limited client keys
+    details: Issue keys for specific request operations and revoke them without restarting the gateway.
 ---
 
 JaGate is a self-hosted approval service for actions such as deploying a site, publishing a post, or starting a maintenance job. Applications in any language use its [HTTP API](/API). Node.js and TypeScript applications can also use the [typed client](/guide/typescript).

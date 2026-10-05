@@ -13,11 +13,12 @@ Read the [**JaGate documentation**](https://ahmetomerv.github.io/JaGate/) for se
 - **Caller-owned actions.** An application submits what it wants to do. After approval, that application performs the action with its own credentials.
 - **Telegram decisions.** A dedicated bot delivers each request to one chat. Only allowlisted numeric user IDs can approve or reject it.
 - **One process.** This release runs Node.js 24, SQLite, and a single Telegram bot.
-- **Separate clients.** Each application has its own API key, destination chat, and approver list.
+- **Separate clients.** Each application has its own credentials, destination chat, and approver list.
 - **Scoped keys.** Issue limited client keys for workers and revoke them without restarting the gateway.
+- **Request listing.** Browse one client's requests with status filters and cursor pagination.
 - **Any language.** Use the HTTP API, or the included TypeScript client.
 - **Durable state.** Proposals, delivery, decisions, and claims are stored in SQLite and survive restarts.
-- **Request history.** Each request has a durable timeline of delivery, decision, and reported execution events.
+- **Request timeline.** Inspect each request's durable delivery, decision, and reported execution events.
 
 For the full picture, see the [documentation](https://ahmetomerv.github.io/JaGate/).
 
