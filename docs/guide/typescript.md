@@ -79,6 +79,9 @@ The calling app owns the action and its credentials. It should execute the exact
 | `cancel(id, signal?)` | Cancel a still-pending request. |
 | `claim(id, signal?)` | Atomically claim an approved, unclaimed request. |
 | `reportResult(id, { claimToken, status, summary }, signal?)` | Record a claimant-reported outcome. |
+| `createClientKey({ label, scopes }, signal?)` | Use a bootstrap key to issue a scoped key; returns the raw key once. |
+| `listClientKeys({ limit, cursor }?, signal?)` | Use a bootstrap key to list issued-key metadata without secrets. |
+| `revokeClientKey(id, signal?)` | Use a bootstrap key to revoke an issued key immediately. |
 
 `waitForDecision` supports `AbortSignal`. `WaitTimeoutError` means only that the local wait ended; it does **not** mean the approval expired. A real server-side expiry is returned as `status: 'expired'`. Non-success HTTP responses throw `ApiError` with `status` and `code` fields. Keep the claim token until result reporting succeeds. If the process crashes after a claim, reconcile the external action before requesting a new approval.
 

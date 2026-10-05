@@ -4,7 +4,7 @@ JaGate reads configuration from environment variables. The local walkthrough use
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
-| `CLIENT_KEYS` | Yes | Comma-separated `clientId:key` entries. Each application gets its own key. |
+| `CLIENT_KEYS` | Yes | Comma-separated `clientId:key` bootstrap credentials. Each client gets one configured bootstrap key and may issue scoped keys through the API. |
 | `TELEGRAM_BOT_TOKEN` | Yes | Token for a dedicated bot from BotFather. |
 | `TELEGRAM_ROUTES` | Yes for multiple clients | JSON object keyed by client ID. Each value has a distinct numeric `chatId` string and a nonempty `approverIds` array of numeric user ID strings. |
 | `TELEGRAM_CHAT_ID`, `TELEGRAM_APPROVER_IDS` | Legacy single-client alternative | One numeric destination chat ID and comma-separated numeric approver IDs. Use only when `CLIENT_KEYS` contains exactly one client and `TELEGRAM_ROUTES` is absent. |
@@ -19,15 +19,15 @@ CLIENT_KEYS=website:<first-random-key>,backups:<second-random-key>
 TELEGRAM_ROUTES='{"website":{"chatId":"-100111","approverIds":["123"]},"backups":{"chatId":"-100222","approverIds":["456","123"]}}'
 ```
 
-Give the website app only its `website` key and the backup app only its `backups` key. The HTTP API derives `clientId` from the key; a caller cannot set ownership in the request body. Each client can create and read only its own requests. A client attempting to read, cancel, claim, or report another client's request receives `404 not_found`, even with a valid claim token. Idempotency keys are unique **within one client**, so both apps may use `daily:2026-09-25` independently.
+Keep these bootstrap keys for administration and issue [scoped client keys](/API#scoped-client-keys) to the website and backup workers. The HTTP API derives `clientId` from either kind of key; a caller cannot set ownership in the request body. Each client can access only its own requests, and issued keys also need the scope for each route. A client attempting to read, cancel, claim, or report another client's request receives `404 not_found`, even with a valid claim token. Idempotency keys are unique **within one client**, so both apps may use `daily:2026-09-25` independently.
 
 The client ID is displayed in Telegram so an approver knows which application requested a decision. JaGate uses one bot token and long poller for all clients. Add that bot to **each** configured private or group chat. A client's request goes only to its configured chat. A button works only for the allowlisted numeric user IDs for that client, in that chat, and on the message JaGate recorded. The same human can be listed for more than one client. Chat IDs must be distinct so one client's request text is not sent to another client's destination.
 
-You can rotate a key by changing its value while keeping the client ID; requests stay owned by that ID. Restart JaGate to load the new environment. Removing a client ID prevents HTTP access to its existing requests until that ID is configured again. Pending undelivered requests for a removed client cannot be routed and are marked as failed delivery; buttons on previously delivered requests can no longer decide them. Settle or cancel pending requests before removing a client. Store client keys, the bot token, and claim tokens outside source control and logs.
+You can rotate a bootstrap key by changing its value while keeping the client ID; requests and issued keys stay owned by that ID. Restart JaGate to load the new environment. Issued keys can be revoked through the API without restart. Removing a client ID prevents both bootstrap and issued keys from accessing its existing requests until that ID is configured again. Pending undelivered requests for a removed client cannot be routed and are marked as failed delivery; buttons on previously delivered requests can no longer decide them. Settle or cancel pending requests before removing a client. Store client keys, the bot token, and claim tokens outside source control and logs.
 
 ## Two-client example
 
-Generate two different keys, put them in `.env` as `CLIENT_KEYS=website:<website-key>,backups:<backups-key>`, configure both routes as above, and start JaGate. Each application receives only its own key. In a separate terminal, set the keys for this example without committing them to source control:
+Generate two different bootstrap keys, put them in `.env` as `CLIENT_KEYS=website:<website-key>,backups:<backups-key>`, configure both routes as above, and start JaGate. The commands below use those keys to demonstrate client isolation; issue narrower keys for deployed workers. In a separate terminal, set the keys for this example without committing them to source control:
 
 ```sh
 export WEBSITE_KEY='paste-website-key-from-your-env'

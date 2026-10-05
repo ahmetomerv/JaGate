@@ -1,10 +1,45 @@
 # HTTP API v1
 
-Base URL: `http://127.0.0.1:3080` by default. All `/v1` routes require `Authorization: Bearer <CLIENT_KEY>`, using the key assigned to one configured client ID. Send JSON with `Content-Type: application/json` for POST. Dates are UTC ISO 8601 strings. `/health` and `/ready` are unauthenticated and contain no secrets. A client ID is derived from the bearer key; callers cannot choose or change it in the request body.
+Base URL: `http://127.0.0.1:3080` by default. All `/v1` routes require `Authorization: Bearer <CLIENT_KEY>`, using a configured bootstrap key or an issued key for one client ID. Send JSON with `Content-Type: application/json` for POST. Dates are UTC ISO 8601 strings. `/health` and `/ready` are unauthenticated and contain no secrets. A client ID is derived from the bearer key; callers cannot choose or change it in the request body.
 
 Set `JAGATE_CLIENT_KEY` to **your application's own** key before using the examples. A single gateway can serve multiple clients, but each key sees only its owner's requests. The gateway never executes the action described in a request.
 
 The server routes each client's approval message to its configured Telegram chat and permits only that client's allowlisted numeric approvers to decide there. HTTP callers cannot choose a chat or approver in a request body. See [Configuration and clients](/guide/configuration).
+
+## Scoped client keys
+
+Each `CLIENT_KEYS` environment entry is a **bootstrap key** for that client. It can use all request routes and manage issued keys for its own client. Keep it in the gateway's local environment or an administrative tool; give applications issued keys with only the permissions they need. The gateway stores issued-key hashes, never their raw values. Bootstrap keys are changed in `CLIENT_KEYS` and loaded on restart; they are not listed or revoked through the API.
+
+Create an issued key with `POST /v1/client-keys` using the bootstrap key. In this example, `JAGATE_CLIENT_KEY` must hold that client's bootstrap key:
+
+```sh
+curl -sS -X POST http://127.0.0.1:3080/v1/client-keys \
+  -H "Authorization: Bearer $JAGATE_CLIENT_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"label":"Website approval worker","scopes":["requests:create","requests:read"]}'
+```
+
+The response is HTTP 201 and includes `id`, `clientId`, `label`, `scopes`, `createdAt`, `revokedAt: null`, and the generated `key`. **The raw `key` is returned only on creation.** Store it privately; listing or revoking a key never returns it. Labels are 1–80 characters after trimming, without control characters. `scopes` must be a nonempty, duplicate-free array of these values:
+
+| Scope | Routes allowed |
+| --- | --- |
+| `requests:create` | `POST /v1/requests` |
+| `requests:read` | `GET /v1/requests`, `GET /v1/requests/:id`, `GET /v1/requests/:id/events` |
+| `requests:cancel` | `POST /v1/requests/:id/cancel` |
+| `requests:claim` | `POST /v1/requests/:id/claim` |
+| `requests:result` | `POST /v1/requests/:id/result` |
+
+Scopes authorize routes; normal request state checks and the one-time claim token still apply. An issued key cannot create, list, or revoke client keys. A missing or revoked key returns 401 `unauthorized`; a valid key lacking a route's scope returns 403 `insufficient_scope`. A key from another client still gets 404 `not_found` for a request or issued-key ID it does not own. Issued keys work only while their client ID remains configured in `CLIENT_KEYS`.
+
+`GET /v1/client-keys?limit=20` lists this client's issued keys newest first, including revoked keys. It returns `{ "items": [/* key metadata, never raw keys */], "nextCursor": null }`. `limit` is 1–100 (default 20); pass a non-null `nextCursor` as `cursor` with the same limit for later pages. Revoke with `POST /v1/client-keys/:id/revoke` and `{}`. The response is the key metadata with `revokedAt`; repeated revocation returns the same metadata. Revocation blocks the next request immediately and persists across restarts. Neither action affects requests already owned by the client.
+
+```sh
+curl -sS -X POST "http://127.0.0.1:3080/v1/client-keys/$KEY_ID/revoke" \
+  -H "Authorization: Bearer $JAGATE_CLIENT_KEY" \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+The TypeScript client exposes `createClientKey`, `listClientKeys`, and `revokeClientKey` for bootstrap-key administration.
 
 ## Create a request
 
@@ -195,7 +230,7 @@ Errors have a stable envelope:
 { "error": { "code": "invalid_state", "message": "only a pending request can be cancelled" } }
 ```
 
-Validation errors also include `issues: [{"path":"expiresInSeconds","message":"..."}]`. Codes: `invalid_input` (400), `unauthorized` (401), `invalid_claim_token` (403), `not_found` (404, including requests owned by another client), `idempotency_conflict` / `invalid_state` / `not_claimable` (409), `not_ready` (503), and `internal_error` (500). HTTP request bodies are limited to 12 KB. No error returns a client key, bot token, or claim token.
+Validation errors also include `issues: [{"path":"expiresInSeconds","message":"..."}]`. Codes: `invalid_input` (400), `unauthorized` (401), `insufficient_scope` / `invalid_claim_token` (403), `not_found` (404, including requests owned by another client), `idempotency_conflict` / `invalid_state` / `not_claimable` (409), `not_ready` (503), and `internal_error` (500). HTTP request bodies are limited to 12 KB. No error returns a client key, bot token, or claim token.
 
 Delivery values: `pending`, `retrying`, `delivered`, `failed`. `deliveryError` is a sanitized transport error message and never contains caller content or credentials. A final `failed` delivery remains visible; submit a new request with a new idempotency key after fixing Telegram configuration. Retrying a failed request with the same key returns the same failed request, and no second notification is sent.
 

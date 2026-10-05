@@ -114,6 +114,30 @@ test('simulated clock expires pending requests and cancellation stops decisions'
   assert.equal((await call(app, session, '/api/decide', { requestId: pendingId, clientId: 'website', decision: 'approve', actor: 'allowed' })).json().request.status, 'cancelled');
 });
 
+test('playground issues and revokes scoped keys through simulated HTTP routes', async () => {
+  const { app } = setup();
+  const session = await token(app);
+  const created = (await call(app, session, '/api/execute', command('keyCreate', {
+    payload: { label: 'Playground reader', scopes: ['requests:read'] },
+  }))).json();
+  assert.equal(created.status, 201);
+  assert.equal(created.body.clientId, 'website');
+  const keyId = created.body.id as string;
+  const scopedKey = created.body.key as string;
+  const listed = (await call(app, session, '/api/execute', command('keyList', { keyPage: { limit: 1 } }))).json();
+  assert.equal(listed.status, 200);
+  assert.deepEqual(listed.body.items.map((item: { id: string }) => item.id), [keyId]);
+  assert.doesNotMatch(JSON.stringify(listed), new RegExp(scopedKey));
+  const read = (await call(app, session, '/api/execute', command('list', { auth: 'scoped', scopedKey }))).json();
+  assert.equal(read.status, 200);
+  assert.equal((await call(app, session, '/api/execute', command('create', { auth: 'scoped', scopedKey,
+    payload: input('scoped:denied') }))).json().status, 403);
+  assert.equal((await call(app, session, '/api/execute', command('keyList', { auth: 'scoped', scopedKey }))).json().status, 403);
+  assert.equal((await call(app, session, '/api/execute', command('keyRevoke', { keyId, clientId: 'backups' }))).json().status, 404);
+  assert.equal((await call(app, session, '/api/execute', command('keyRevoke', { keyId }))).json().status, 200);
+  assert.equal((await call(app, session, '/api/execute', command('list', { auth: 'scoped', scopedKey }))).json().status, 401);
+});
+
 test('live mode keeps client keys in the backend while calling the real HTTP routes', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'jagate-playground-live-'));
   dirs.push(dir);
@@ -142,5 +166,12 @@ test('live mode keeps client keys in the backend while calling the real HTTP rou
     const events = (await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'events', requestId: created.body.id })).json();
     assert.equal(events.status, 200);
     assert.deepEqual(events.body.items.map((event: { type: string }) => event.type), ['request.created']);
+    const issued = (await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'keyCreate',
+      payload: { label: 'Live reader', scopes: ['requests:read'] } })).json();
+    assert.equal(issued.status, 201);
+    assert.equal((await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'get',
+      requestId: created.body.id, auth: 'scoped', scopedKey: issued.body.key })).json().status, 200);
+    assert.equal((await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'keyRevoke',
+      keyId: issued.body.id })).json().status, 200);
   } finally { await gateway.close(); db.close(); }
 });

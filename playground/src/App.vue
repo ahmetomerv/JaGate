@@ -2,7 +2,10 @@
 import { computed, onMounted, ref, watch } from 'vue';
 
 type Mode = 'simulated' | 'live';
-type Operation = 'create' | 'list' | 'get' | 'events' | 'cancel' | 'claim' | 'result' | 'health' | 'ready';
+type Operation = 'create' | 'list' | 'get' | 'events' | 'cancel' | 'claim' | 'result' | 'keyCreate' | 'keyList' | 'keyRevoke' | 'health' | 'ready';
+type ClientKeyScope = 'requests:create' | 'requests:read' | 'requests:cancel' | 'requests:claim' | 'requests:result';
+type ClientKeyView = { id: string; clientId: string; label: string; scopes: ClientKeyScope[]; createdAt: string; revokedAt: string | null };
+type KeyPage = { items: ClientKeyView[]; nextCursor: string | null };
 type RequestView = {
   id: string; clientId: string; title: string; action: string; status: string; executionStatus: string;
   deliveryStatus: string; deliveryAttempts: number; createdAt: string; expiresAt: string; resultSummary: string | null;
@@ -16,7 +19,17 @@ type Bootstrap = { token: string; simulatedClients: string[]; liveClients: strin
 const bootstrap = ref<Bootstrap | null>(null);
 const mode = ref<Mode>('simulated');
 const clientId = ref('website');
-const auth = ref<'valid' | 'missing' | 'invalid'>('valid');
+const auth = ref<'valid' | 'scoped' | 'missing' | 'invalid'>('valid');
+const scopedKey = ref('');
+const showScopedKey = ref(false);
+const keyId = ref('');
+const keyLabel = ref('Local worker');
+const keyScopes = ref<ClientKeyScope[]>(['requests:create', 'requests:read']);
+const availableKeyScopes: ClientKeyScope[] = ['requests:create', 'requests:read', 'requests:cancel', 'requests:claim', 'requests:result'];
+const keyPage = ref<KeyPage | null>(null);
+const keyLimit = ref(20);
+const keyCursor = ref('');
+const keyCursorStack = ref<string[]>([]);
 const requestId = ref('');
 const history = ref<RequestView[]>([]);
 const listPage = ref<ListPage | null>(null);
@@ -60,9 +73,15 @@ const endpoints: Array<{ operation: Operation; method: 'GET' | 'POST'; label: st
   { operation: 'cancel', method: 'POST', label: 'Cancel request', path: '/v1/requests/:id/cancel' },
   { operation: 'claim', method: 'POST', label: 'Claim approval', path: '/v1/requests/:id/claim' },
   { operation: 'result', method: 'POST', label: 'Report result', path: '/v1/requests/:id/result' },
+  { operation: 'keyCreate', method: 'POST', label: 'Create client key', path: '/v1/client-keys' },
+  { operation: 'keyList', method: 'GET', label: 'List client keys', path: '/v1/client-keys' },
+  { operation: 'keyRevoke', method: 'POST', label: 'Revoke client key', path: '/v1/client-keys/:id/revoke' },
   { operation: 'health', method: 'GET', label: 'Health', path: '/health' },
   { operation: 'ready', method: 'GET', label: 'Readiness', path: '/ready' },
 ];
+const requestEndpoints = endpoints.filter((item) => !item.operation.startsWith('key') && !['health', 'ready'].includes(item.operation));
+const keyEndpoints = endpoints.filter((item) => item.operation.startsWith('key'));
+const utilityEndpoints = endpoints.filter((item) => ['health', 'ready'].includes(item.operation));
 
 const clients = computed(() => mode.value === 'simulated' ? bootstrap.value?.simulatedClients ?? [] : bootstrap.value?.liveClients ?? []);
 const selected = computed(() => [...history.value, ...(listPage.value?.items ?? [])].find((item) => item.id === requestId.value));
@@ -76,18 +95,21 @@ const listFilters = computed(() => ({
   ...(listCursor.value ? { cursor: listCursor.value } : {}),
 }));
 const eventFilters = computed(() => ({ limit: Number(eventLimit.value), ...(eventCursor.value ? { cursor: eventCursor.value } : {}) }));
+const keyFilters = computed(() => ({ limit: Number(keyLimit.value), ...(keyCursor.value ? { cursor: keyCursor.value } : {}) }));
 const requestPath = computed(() => {
-  const path = endpoint.value.path.replace(':id', requestId.value || ':id');
-  const query = operation.value === 'list' ? listFilters.value : operation.value === 'events' ? eventFilters.value : null;
+  const path = endpoint.value.path.replace(':id', operation.value === 'keyRevoke' ? keyId.value || ':id' : requestId.value || ':id');
+  const query = operation.value === 'list' ? listFilters.value : operation.value === 'events' ? eventFilters.value : operation.value === 'keyList' ? keyFilters.value : null;
   return query ? `${path}?${new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)])).toString()}` : path;
 });
-const needsRequestId = computed(() => !['create', 'list', 'health', 'ready'].includes(operation.value));
+const needsRequestId = computed(() => ['get', 'events', 'cancel', 'claim', 'result'].includes(operation.value));
+const needsKeyId = computed(() => operation.value === 'keyRevoke');
 const previewBody = computed(() => operation.value === 'create' ? {
   idempotencyKey: key.value, action: action.value, title: title.value, description: description.value,
   details: parsePreview(detailsText.value), metadata: parsePreview(metadataText.value), expiresInSeconds: Number(expiresInSeconds.value),
 } : operation.value === 'result' ? {
   claimToken: claimToken.value, status: resultStatus.value, summary: resultSummary.value,
-} : operation.value === 'list' ? listFilters.value : operation.value === 'events' ? eventFilters.value : {});
+} : operation.value === 'keyCreate' ? { label: keyLabel.value, scopes: keyScopes.value }
+  : operation.value === 'list' ? listFilters.value : operation.value === 'events' ? eventFilters.value : operation.value === 'keyList' ? keyFilters.value : {});
 
 watch([listStatus, listDeliveryStatus, listExecutionStatus, listLimit, clientId, mode], () => {
   listCursor.value = '';
@@ -104,6 +126,16 @@ watch([requestId, clientId, mode, eventLimit], () => {
   eventPage.value = null;
   eventCursor.value = '';
   eventCursorStack.value = [];
+});
+watch([clientId, mode, keyLimit], () => {
+  keyPage.value = null;
+  keyCursor.value = '';
+  keyCursorStack.value = [];
+});
+watch([clientId, mode], () => {
+  scopedKey.value = '';
+  keyId.value = '';
+  auth.value = 'valid';
 });
 
 function parsePreview(value: string) {
@@ -122,6 +154,9 @@ function selectOperation(next: Operation) {
     eventPage.value = null;
     eventCursor.value = '';
     eventCursorStack.value = [];
+    keyPage.value = null;
+    keyCursor.value = '';
+    keyCursorStack.value = [];
   }
   operation.value = next;
   requestTab.value = 'body';
@@ -185,6 +220,7 @@ function changeMode(next: Mode) {
   clientId.value = clients.value[0] ?? '';
   requestId.value = '';
   claimToken.value = '';
+  scopedKey.value = '';
   error.value = '';
 }
 
@@ -194,6 +230,7 @@ async function execute(sentOperation: Operation) {
   const sentMode = mode.value;
   const sentClient = clientId.value;
   const sentRequestId = requestId.value;
+  const sentKeyId = keyId.value;
   let payload: unknown;
   try {
     if (sentOperation === 'create') payload = {
@@ -201,27 +238,37 @@ async function execute(sentOperation: Operation) {
       details: JSON.parse(detailsText.value), metadata: JSON.parse(metadataText.value), expiresInSeconds: Number(expiresInSeconds.value),
     };
     if (sentOperation === 'result') payload = { claimToken: claimToken.value, status: resultStatus.value, summary: resultSummary.value };
+    if (sentOperation === 'keyCreate') payload = { label: keyLabel.value, scopes: keyScopes.value };
     busy.value = true;
     const response = await api('/api/execute', {
-      mode: sentMode, clientId: sentClient, operation: sentOperation, auth: auth.value, requestId: requestId.value,
+      mode: sentMode, clientId: sentClient, operation: sentOperation, auth: auth.value,
+      ...(auth.value === 'scoped' ? { scopedKey: scopedKey.value } : {}), requestId: requestId.value, keyId: keyId.value,
       ...(sentOperation === 'list' ? { filters: listFilters.value } : {}),
-      ...(sentOperation === 'events' ? { eventPage: eventFilters.value } : {}), payload,
+      ...(sentOperation === 'events' ? { eventPage: eventFilters.value } : {}),
+      ...(sentOperation === 'keyList' ? { keyPage: keyFilters.value } : {}), payload,
     }) as { status: number; body: Record<string, unknown> };
     const current = sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value &&
-      (sentOperation !== 'events' || sentRequestId === requestId.value);
+      (sentOperation !== 'events' || sentRequestId === requestId.value) && (sentOperation !== 'keyRevoke' || sentKeyId === keyId.value);
     record(`${sentOperation.toUpperCase()} · ${sentClient} · ${sentMode}`, response.status, response.body, current);
     if (!current) return;
     if (sentOperation === 'list') listPage.value = response.status === 200 ? response.body as unknown as ListPage : null;
     if (sentOperation === 'events') eventPage.value = response.status === 200 ? response.body as unknown as EventPage : null;
+    if (sentOperation === 'keyList') keyPage.value = response.status === 200 ? response.body as unknown as KeyPage : null;
+    if (sentOperation === 'keyCreate' && response.status === 201) {
+      keyId.value = String(response.body.id);
+      scopedKey.value = String(response.body.key);
+      keyPage.value = null;
+    }
+    if (sentOperation === 'keyRevoke' && response.status === 200) keyPage.value = null;
     const view = sentOperation === 'claim' ? response.body.request : response.body;
-    if (view && typeof view === 'object' && 'id' in view) {
+    if (['create', 'get', 'cancel', 'claim', 'result'].includes(sentOperation) && view && typeof view === 'object' && 'id' in view) {
       const item = view as RequestView;
       if (requestId.value !== item.id && sentOperation !== 'claim') claimToken.value = '';
       remember(item);
       requestId.value = item.id;
     }
     if (sentOperation === 'claim' && typeof response.body.claimToken === 'string') claimToken.value = response.body.claimToken;
-    if (!['list', 'events'].includes(sentOperation)) await refreshHistory();
+    if (['create', 'get', 'cancel', 'claim', 'result'].includes(sentOperation)) await refreshHistory();
   } catch (cause) {
     if (sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value)
       error.value = cause instanceof Error ? cause.message : 'Request failed';
@@ -253,6 +300,24 @@ async function previousEventPage() {
   if (!eventCursorStack.value.length || busy.value) return;
   eventCursor.value = eventCursorStack.value.pop()!;
   await execute('events');
+}
+
+async function nextKeyPage() {
+  if (!keyPage.value?.nextCursor || busy.value) return;
+  keyCursorStack.value.push(keyCursor.value);
+  keyCursor.value = keyPage.value.nextCursor;
+  await execute('keyList');
+}
+
+async function previousKeyPage() {
+  if (!keyCursorStack.value.length || busy.value) return;
+  keyCursor.value = keyCursorStack.value.pop()!;
+  await execute('keyList');
+}
+
+function selectClientKey(item: ClientKeyView) {
+  keyId.value = item.id;
+  selectOperation('keyRevoke');
 }
 
 function eventLabel(type: string): string {
@@ -340,7 +405,8 @@ onMounted(async () => {
       </div>
       <div class="environment-right">
         <label class="inline-field">Client <select v-model="clientId" :disabled="!clients.length"><option v-for="id in clients" :key="id" :value="id">{{ id }}</option></select></label>
-        <label class="inline-field">Auth <select v-model="auth"><option value="valid">Valid key</option><option value="missing">Missing key</option><option value="invalid">Invalid key</option></select></label>
+        <label class="inline-field">Auth <select v-model="auth"><option value="valid">Bootstrap key</option><option value="scoped">Issued key</option><option value="missing">Missing key</option><option value="invalid">Invalid key</option></select></label>
+        <label v-if="auth === 'scoped'" class="inline-field issued-key-field">Issued key <input v-model="scopedKey" :type="showScopedKey ? 'text' : 'password'" autocomplete="off" spellcheck="false" placeholder="Paste the key returned once" /><button class="subtle-button" @click="showScopedKey = !showScopedKey">{{ showScopedKey ? 'Hide' : 'Show' }}</button></label>
       </div>
     </div>
 
@@ -350,8 +416,20 @@ onMounted(async () => {
     <main class="workspace">
       <aside class="sidebar">
         <div class="sidebar-section">
-          <div class="sidebar-heading"><span>REQUESTS</span><span class="count">{{ endpoints.length }}</span></div>
-          <button v-for="item in endpoints" :key="item.operation" class="endpoint-item" :class="{ active: operation === item.operation }" @click="selectOperation(item.operation)">
+          <div class="sidebar-heading"><span>REQUESTS</span><span class="count">{{ requestEndpoints.length }}</span></div>
+          <button v-for="item in requestEndpoints" :key="item.operation" class="endpoint-item" :class="{ active: operation === item.operation }" @click="selectOperation(item.operation)">
+            <span class="method" :class="item.method.toLowerCase()">{{ item.method }}</span><span class="endpoint-label">{{ item.label }}</span>
+          </button>
+        </div>
+        <div class="sidebar-section key-section">
+          <div class="sidebar-heading"><span>CLIENT KEYS</span><span class="count">{{ keyEndpoints.length }}</span></div>
+          <button v-for="item in keyEndpoints" :key="item.operation" class="endpoint-item" :class="{ active: operation === item.operation }" @click="selectOperation(item.operation)">
+            <span class="method" :class="item.method.toLowerCase()">{{ item.method }}</span><span class="endpoint-label">{{ item.label }}</span>
+          </button>
+        </div>
+        <div class="sidebar-section utility-section">
+          <div class="sidebar-heading"><span>STATUS</span></div>
+          <button v-for="item in utilityEndpoints" :key="item.operation" class="endpoint-item" :class="{ active: operation === item.operation }" @click="selectOperation(item.operation)">
             <span class="method" :class="item.method.toLowerCase()">{{ item.method }}</span><span class="endpoint-label">{{ item.label }}</span>
           </button>
         </div>
@@ -373,19 +451,19 @@ onMounted(async () => {
           <div class="request-bar">
             <span class="request-method" :class="endpoint.method.toLowerCase()">{{ endpoint.method }}<span class="chevron">⌄</span></span>
             <div class="url-field"><span class="url-origin">{{ mode === 'simulated' ? 'simulated://jagate' : bootstrap?.gatewayUrl }}</span><strong>{{ requestPath }}</strong></div>
-            <button class="send-button" :disabled="busy || !clientId || (needsRequestId && !requestId)" @click="execute(operation)">{{ busy ? 'Sending…' : 'Send' }} <span>➜</span></button>
+            <button class="send-button" :disabled="busy || !clientId || (needsRequestId && !requestId) || (needsKeyId && !keyId) || (auth === 'scoped' && !scopedKey)" @click="execute(operation)">{{ busy ? 'Sending…' : 'Send' }} <span>➜</span></button>
           </div>
           <div class="request-tabs" role="tablist" aria-label="Request editor">
-            <button role="tab" :aria-selected="requestTab === 'body'" :class="{ active: requestTab === 'body' }" @click="requestTab = 'body'">{{ needsRequestId ? 'Params & body' : operation === 'create' ? 'Body' : operation === 'list' ? 'Filters' : 'Overview' }}</button>
+            <button role="tab" :aria-selected="requestTab === 'body'" :class="{ active: requestTab === 'body' }" @click="requestTab = 'body'">{{ needsRequestId || needsKeyId ? 'Params & body' : operation === 'create' || operation === 'keyCreate' ? 'Body' : operation === 'list' || operation === 'keyList' ? 'Filters' : 'Overview' }}</button>
             <button role="tab" :aria-selected="requestTab === 'preview'" :class="{ active: requestTab === 'preview' }" @click="requestTab = 'preview'">JSON preview</button>
-            <span class="tabs-spacer"></span><span class="auth-summary">Authorization <strong>{{ auth === 'valid' ? 'Bearer key' : auth === 'missing' ? 'None' : 'Invalid key' }}</strong></span>
+            <span class="tabs-spacer"></span><span class="auth-summary">Authorization <strong>{{ auth === 'valid' ? 'Bootstrap key' : auth === 'scoped' ? 'Issued key' : auth === 'missing' ? 'None' : 'Invalid key' }}</strong></span>
           </div>
 
           <div v-if="requestTab === 'preview'" class="editor-body preview-body">
-            <div class="editor-caption"><span>{{ operation === 'list' || operation === 'events' ? 'QUERY PARAMETERS' : 'REQUEST BODY' }}</span><span>Read only preview</span></div>
+            <div class="editor-caption"><span>{{ operation === 'list' || operation === 'events' || operation === 'keyList' ? 'QUERY PARAMETERS' : 'REQUEST BODY' }}</span><span>Read only preview</span></div>
             <pre>{{ JSON.stringify(previewBody, null, 2) }}</pre>
-            <p v-if="operation === 'create' || operation === 'result'" class="help-text">Edit values in the {{ needsRequestId ? 'Params & body' : 'Body' }} tab.</p>
-            <p v-else-if="operation !== 'list' && operation !== 'events'" class="help-text">This endpoint does not require a request body.</p>
+            <p v-if="operation === 'create' || operation === 'result' || operation === 'keyCreate'" class="help-text">Edit values in the {{ needsRequestId ? 'Params & body' : 'Body' }} tab.</p>
+            <p v-else-if="operation !== 'list' && operation !== 'events' && operation !== 'keyList'" class="help-text">This endpoint does not require a request body.</p>
           </div>
 
           <div v-else class="editor-body">
@@ -411,6 +489,22 @@ onMounted(async () => {
                 <label>Page size<input v-model.number="listLimit" type="number" min="1" max="100" /></label>
               </div>
               <p class="help-text">Newest first. Send to load a page, then use Next page when more requests exist.</p>
+            </template>
+            <template v-else-if="operation === 'keyCreate'">
+              <div class="editor-caption"><span>APPLICATION / JSON</span><span>Bootstrap key required</span></div>
+              <div class="form-grid"><label class="span-2">Key label<input v-model="keyLabel" maxlength="80" placeholder="Name the app or worker" /></label></div>
+              <fieldset class="scope-fieldset"><legend>Allowed request operations</legend><label v-for="scope in availableKeyScopes" :key="scope" class="scope-option"><input v-model="keyScopes" type="checkbox" :value="scope" />{{ scope }}</label></fieldset>
+              <p class="help-text">The new key appears only in the creation response. It also fills the Issued key field for this browser session; copy it before leaving.</p>
+            </template>
+            <template v-else-if="operation === 'keyList'">
+              <div class="editor-caption"><span>QUERY PARAMETERS</span><span>Bootstrap key required</span></div>
+              <div class="form-grid"><label>Page size<input v-model.number="keyLimit" type="number" min="1" max="100" /></label></div>
+              <p class="help-text">Lists this client's issued keys, including revoked keys. Secret values are never returned here.</p>
+            </template>
+            <template v-else-if="operation === 'keyRevoke'">
+              <div class="editor-caption"><span>PATH PARAMETERS</span><span>Bootstrap key required</span></div>
+              <div class="form-grid"><label class="span-2">Client key ID<input v-model="keyId" placeholder="Select a listed key or paste its UUID" spellcheck="false" /></label></div>
+              <p class="help-text">Revocation takes effect on the next API request. The configured bootstrap key is rotated in .env, not here.</p>
             </template>
             <template v-else-if="needsRequestId">
               <div class="editor-caption"><span>PATH PARAMETERS</span><span>Required</span></div>
@@ -458,6 +552,16 @@ onMounted(async () => {
             <span class="list-result-status">{{ item.status }} <span aria-hidden="true">→</span></span>
           </button>
           <div class="list-pagination"><span>Page {{ listCursorStack.length + 1 }}</span><div class="list-pagination-actions"><button class="utility-button" :disabled="busy || !listCursorStack.length" @click="previousPage">← Previous</button><button class="utility-button" :disabled="busy || !listPage.nextCursor" @click="nextPage">Next →</button></div></div>
+        </section>
+
+        <section v-if="operation === 'keyList' && keyPage" class="list-results" aria-label="Listed client keys">
+          <div class="list-results-heading"><strong>Client keys in this page</strong><span>{{ keyPage.items.length }} shown</span></div>
+          <p v-if="!keyPage.items.length" class="list-empty">No issued keys on this page.</p>
+          <button v-for="item in keyPage.items" :key="item.id" class="list-result" @click="selectClientKey(item)">
+            <span><strong>{{ item.label }}</strong><small>{{ item.id }} · {{ item.scopes.join(', ') }}</small></span>
+            <span class="list-result-status">{{ item.revokedAt ? 'Revoked' : 'Active' }} <span aria-hidden="true">→</span></span>
+          </button>
+          <div class="list-pagination"><span>Page {{ keyCursorStack.length + 1 }}</span><div class="list-pagination-actions"><button class="utility-button" :disabled="busy || !keyCursorStack.length" @click="previousKeyPage">← Previous</button><button class="utility-button" :disabled="busy || !keyPage.nextCursor" @click="nextKeyPage">Next →</button></div></div>
         </section>
 
         <section v-if="mode === 'simulated'" class="simulation-strip">

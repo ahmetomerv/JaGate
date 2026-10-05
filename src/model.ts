@@ -66,6 +66,21 @@ export type RequestEvent = { sequence: number; type: RequestEventType; occurredA
 export type RequestEventsQuery = { limit?: number; cursor?: string };
 export type RequestEventsPage = { items: RequestEvent[]; nextCursor: string | null };
 
+export const clientKeyScopes = ['requests:create', 'requests:read', 'requests:cancel', 'requests:claim', 'requests:result'] as const;
+export type ClientKeyScope = typeof clientKeyScopes[number];
+export type ClientKeyView = {
+  id: string;
+  clientId: string;
+  label: string;
+  scopes: ClientKeyScope[];
+  createdAt: string;
+  revokedAt: string | null;
+};
+export type IssuedClientKey = ClientKeyView & { key: string };
+export type ListClientKeysPage = { items: ClientKeyView[]; nextCursor: string | null };
+export type CreateClientKeyInput = { label: string; scopes: ClientKeyScope[] };
+export type ListClientKeysQuery = { limit?: number; cursor?: string };
+
 function stable(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stable);
   if (value && typeof value === 'object') {

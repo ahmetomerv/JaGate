@@ -1,6 +1,7 @@
-import type { CreateRequestInput, ListRequestsPage, ListRequestsQuery, RequestEventsPage, RequestEventsQuery, RequestView } from './model.js';
+import type { ClientKeyView, CreateClientKeyInput, CreateRequestInput, IssuedClientKey, ListClientKeysPage, ListClientKeysQuery, ListRequestsPage, ListRequestsQuery, RequestEventsPage, RequestEventsQuery, RequestView } from './model.js';
 
 export type { CreateRequestInput, ListRequestsPage, ListRequestsQuery, RequestEvent, RequestEventType, RequestEventsPage, RequestEventsQuery, RequestView } from './model.js';
+export type { ClientKeyScope, ClientKeyView, CreateClientKeyInput, IssuedClientKey, ListClientKeysPage, ListClientKeysQuery } from './model.js';
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) { super(message); }
 }
@@ -36,6 +37,19 @@ export class ApprovalClient {
     if (query.cursor) params.set('cursor', query.cursor);
     const search = params.toString();
     return this.call(`/v1/requests/${encodeURIComponent(id)}/events${search ? `?${search}` : ''}`, 'GET', undefined, signal);
+  }
+  createClientKey(input: CreateClientKeyInput, signal?: AbortSignal): Promise<IssuedClientKey> {
+    return this.call('/v1/client-keys', 'POST', input, signal);
+  }
+  listClientKeys(query: ListClientKeysQuery = {}, signal?: AbortSignal): Promise<ListClientKeysPage> {
+    const params = new URLSearchParams();
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    if (query.cursor) params.set('cursor', query.cursor);
+    const search = params.toString();
+    return this.call(`/v1/client-keys${search ? `?${search}` : ''}`, 'GET', undefined, signal);
+  }
+  revokeClientKey(id: string, signal?: AbortSignal): Promise<ClientKeyView> {
+    return this.call(`/v1/client-keys/${encodeURIComponent(id)}/revoke`, 'POST', {}, signal);
   }
   cancel(id: string, signal?: AbortSignal): Promise<RequestView> { return this.call(`/v1/requests/${encodeURIComponent(id)}/cancel`, 'POST', {}, signal); }
   claim(id: string, signal?: AbortSignal): Promise<{ claimId: string; claimToken: string; request: RequestView }> { return this.call(`/v1/requests/${encodeURIComponent(id)}/claim`, 'POST', {}, signal); }

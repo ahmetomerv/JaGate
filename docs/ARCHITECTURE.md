@@ -19,7 +19,7 @@ flowchart LR
 | Component | Responsibility |
 | --- | --- |
 | `src/config.ts` and `src/main.ts` | Validate environment configuration, open SQLite, start Telegram and HTTP, and shut them down. Only one process should use a bot token and database. |
-| `src/http.ts` | Resolves each `/v1` bearer key to a client ID, validates bodies and IDs, maps lifecycle errors to documented HTTP responses, and exposes `/health` and `/ready`. |
+| `src/http.ts` | Resolves each `/v1` bearer key to a client ID, checks issued-key scopes on every route, validates bodies and IDs, maps lifecycle errors to documented HTTP responses, and exposes `/health` and `/ready`. |
 | `src/core.ts` | Owns state transitions, idempotency, expiry, delivery records, atomic claim, result reporting, and transactional event records. It has no HTTP or Telegram request types. Its clock is injected for deterministic tests. |
 | `src/storage.ts` and `migrations/` | Opens SQLite in WAL mode and applies numbered SQL migrations transactionally. |
 | `src/telegram.ts` | Formats and escapes messages, routes them by client ID, checks each client's numeric chat and user IDs, polls callbacks, and asks the core to decide. The transport interface lets tests use an in-memory fake. |
@@ -37,7 +37,7 @@ The HTTP API is usable from any language. The TypeScript client is a convenience
 
 ## SQLite schema at a glance
 
-The schema starts in [`migrations/001_initial.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/001_initial.sql). [`migrations/002_delivery_chat.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/002_delivery_chat.sql) adds the stored destination chat binding. [`migrations/004_request_events.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/004_request_events.sql) adds per-request history. There are four tables and no user-account or workflow tables.
+The schema starts in [`migrations/001_initial.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/001_initial.sql). [`migrations/002_delivery_chat.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/002_delivery_chat.sql) adds the stored destination chat binding. [`migrations/004_request_events.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/004_request_events.sql) adds per-request history, and [`migrations/005_client_keys.sql`](https://github.com/ahmetomerv/JaGate/blob/main/migrations/005_client_keys.sql) adds issued keys. There are five tables and no user-account or workflow tables.
 
 | Table | Main fields | Purpose |
 | --- | --- | --- |
@@ -46,12 +46,13 @@ The schema starts in [`migrations/001_initial.sql`](https://github.com/ahmetomer
 | `requests` | `delivery_status`, `delivery_attempts`, `next_delivery_at`, `delivery_error`, `callback_ref`, `delivery_chat_id`, `delivery_message_id` | A small durable notification queue and the binding between one Telegram button and its stored chat and message. The callback contains only the opaque reference and desired decision. |
 | `requests` | `execution_status`, `claimed_at`, `claim_id`, `claim_token_hash`, `result_summary`, `result_at` | Claim ownership and the caller-reported outcome. The raw claim token is never stored. |
 | `request_events` | `request_id`, `sequence`, `type`, `occurred_at`, `actor_id`, `attempt` | Append-only state transition timeline for one request. The event sequence is unique per request. Sensitive request content and authorization material are omitted. |
+| `client_keys` | `id`, `client_id`, `label`, `key_hash`, `scopes_json`, `created_at`, `revoked_at` | Hashed, scoped, revocable issued credentials owned by a configured client. The raw key is returned once and is not stored. |
 | `settings` | `key`, `value` | Stores the Telegram polling offset. An update ID is saved only after that update has been handled. |
 | `schema_migrations` | `version` | Records which numbered SQL migrations were applied. |
 
 The `requests` row is the authoritative current state. Each successful state change appends its event in the same SQLite transaction, so a failed event write rolls back the state change. The event table begins empty when migration 004 runs; earlier transitions are not reconstructed. There is no separate execution queue: the gateway does not run actions. The indexes support due-delivery, pending-expiry, and per-client newest-first listing scans.
 
-Client IDs and keys live in `CLIENT_KEYS` in the server environment, not in the database. `TELEGRAM_ROUTES` maps each client ID to its current destination chat and approver allowlist. The database stores the client ID on each request and the chat ID only after successful delivery. Changing a key for the same ID preserves access.
+Client IDs and bootstrap keys live in `CLIENT_KEYS` in the server environment. Issued keys live in SQLite as hashes and are accepted only while their client ID remains configured. The bootstrap key can administer issued keys for its own client; issued keys cannot manage keys or elevate their scopes. `TELEGRAM_ROUTES` maps each client ID to its current destination chat and approver allowlist. The database stores the client ID on each request and the chat ID only after successful delivery. Rotating a bootstrap key for the same ID preserves request ownership and issued-key access.
 
 ## State transitions
 
@@ -66,7 +67,7 @@ Only `approved + unclaimed` can be claimed. Expiry applies while a request is pe
 
 ## Trust and failure boundaries
 
-- Each client key authorizes creation under its own client ID and access only to its own requests. Reads, cancellation, claims, and results for another client's request return 404. `/health` and `/ready` are public and return no credentials. Each client's configured Telegram chat and numeric approver allowlist control its button decisions; usernames and forwarded messages do not grant authority.
+- Each key authorizes only its client ID. Issued keys additionally need the route's scope, and revocation is checked on each request. Reads, cancellation, claims, and results for another client's request return 404. `/health` and `/ready` are public and return no credentials. Each client's configured Telegram chat and numeric approver allowlist control its button decisions; usernames and forwarded messages do not grant authority.
 - The immutable stored proposal tells the approver what was approved. The caller must use those same parameters when executing. Action credentials stay in the caller's application, and no HTTP field is interpreted as a command, URL to call, script, or callback to execute.
 - SQLite writes settle decisions and claims before external follow-up work. Telegram message edits are best effort; a failed edit does not undo a decision. Polling offsets advance after processing, so replay after a crash is safe because decision updates are conditional.
 - A crash between Telegram accepting a send and SQLite storing its chat and message IDs can cause a duplicate message on retry. Only the recorded chat and message can decide the request. Delivery status and sanitized errors remain visible through the API.

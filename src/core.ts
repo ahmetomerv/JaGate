@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Db } from './storage.js';
 import { GatewayError } from './errors.js';
-import { canonicalContent, hash, type CreateInput, type DecisionStatus, type ListRequestsPage, type ListRequestsQuery, type RequestEvent, type RequestEventType, type RequestEventsPage, type RequestView } from './model.js';
+import { canonicalContent, hash, type ClientKeyScope, type ClientKeyView, type CreateInput, type DecisionStatus, type IssuedClientKey, type ListClientKeysPage, type ListRequestsPage, type ListRequestsQuery, type RequestEvent, type RequestEventType, type RequestEventsPage, type RequestView } from './model.js';
 
 type Row = {
   id: string; client_id: string; idempotency_key: string; fingerprint: string; action: string; title: string;
@@ -14,6 +14,8 @@ type Row = {
   callback_ref: string; delivery_message_id: string | null; delivery_chat_id: string | null;
 };
 
+type ClientKeyRow = { id: string; client_id: string; label: string; key_hash: string; scopes_json: string; created_at: string; revoked_at: string | null };
+
 export type DeliveryJob = { id: string; callbackRef: string; view: RequestView; attempts: number };
 
 export class GatewayCore {
@@ -21,6 +23,46 @@ export class GatewayCore {
 
   private iso(): string { return this.now().toISOString(); }
   private row(id: string): Row | undefined { return this.db.prepare('SELECT * FROM requests WHERE id = ?').get(id) as Row | undefined; }
+  private keyView(row: ClientKeyRow): ClientKeyView {
+    return { id: row.id, clientId: row.client_id, label: row.label, scopes: JSON.parse(row.scopes_json) as ClientKeyScope[],
+      createdAt: row.created_at, revokedAt: row.revoked_at };
+  }
+
+  authenticateClientKey(key: string): { clientId: string; scopes: ClientKeyScope[] } | undefined {
+    const row = this.db.prepare('SELECT * FROM client_keys WHERE key_hash = ? AND revoked_at IS NULL')
+      .get(hash(key)) as ClientKeyRow | undefined;
+    return row ? { clientId: row.client_id, scopes: this.keyView(row).scopes } : undefined;
+  }
+
+  issueClientKey(clientId: string, label: string, scopes: ClientKeyScope[]): IssuedClientKey {
+    const id = randomUUID();
+    const key = `jgk_${randomBytes(32).toString('base64url')}`;
+    const now = this.iso();
+    this.db.prepare('INSERT INTO client_keys(id,client_id,label,key_hash,scopes_json,created_at) VALUES (?,?,?,?,?,?)')
+      .run(id, clientId, label, hash(key), JSON.stringify(scopes), now);
+    return { id, clientId, label, scopes, createdAt: now, revokedAt: null, key };
+  }
+
+  listClientKeys(clientId: string, options: { limit: number; before?: { createdAt: string; id: string } }): ListClientKeysPage {
+    const limit = options.limit;
+    const rows = options.before
+      ? this.db.prepare(`SELECT * FROM client_keys WHERE client_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))
+        ORDER BY created_at DESC, id DESC LIMIT ?`).all(clientId, options.before.createdAt, options.before.createdAt, options.before.id, limit + 1) as ClientKeyRow[]
+      : this.db.prepare('SELECT * FROM client_keys WHERE client_id = ? ORDER BY created_at DESC, id DESC LIMIT ?')
+        .all(clientId, limit + 1) as ClientKeyRow[];
+    const page = rows.slice(0, limit);
+    const last = page.at(-1);
+    return { items: page.map((row) => this.keyView(row)),
+      nextCursor: rows.length > limit && last ? Buffer.from(JSON.stringify([last.created_at, last.id])).toString('base64url') : null };
+  }
+
+  revokeClientKey(clientId: string, id: string): ClientKeyView {
+    this.db.prepare('UPDATE client_keys SET revoked_at = ? WHERE id = ? AND client_id = ? AND revoked_at IS NULL')
+      .run(this.iso(), id, clientId);
+    const row = this.db.prepare('SELECT * FROM client_keys WHERE id = ? AND client_id = ?').get(id, clientId) as ClientKeyRow | undefined;
+    if (!row) throw new GatewayError('not_found', 404, 'client key not found');
+    return this.keyView(row);
+  }
   private appendEvent(id: string, type: RequestEventType, occurredAt: string, actorId: string | null = null, attempt: number | null = null): void {
     this.db.prepare(`INSERT INTO request_events(request_id, sequence, type, occurred_at, actor_id, attempt)
       SELECT ?, COALESCE(MAX(sequence), 0) + 1, ?, ?, ?, ? FROM request_events WHERE request_id = ?`)

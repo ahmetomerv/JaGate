@@ -111,7 +111,7 @@ test('migration and canonical idempotency survive restart without changing appro
   db.close();
   const reopened = openDatabase(path); dbs.push(reopened);
   const restarted = new GatewayCore(reopened, clock);
-  assert.equal((reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 4);
+  assert.equal((reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 5);
   const reordered = { ...original, metadata: { options: { a: 1, b: 2 }, ticket: 'OPS-1' } };
   assert.equal(restarted.create('primary', reordered).request.id, created.id);
   assert.throws(() => restarted.create('primary', { ...original, details: [{ label: 'Target', value: 'production' }] }), { code: 'idempotency_conflict' });
@@ -159,6 +159,7 @@ test('all v1 routes require a valid key while health stays public', async () => 
   const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
   const routes: Array<['GET' | 'POST', string]> = [
     ['POST', '/v1/requests'], ['GET', '/v1/requests'], ['GET', `/v1/requests/${id}`], ['GET', `/v1/requests/${id}/events`],
+    ['POST', '/v1/client-keys'], ['GET', '/v1/client-keys'], ['POST', '/v1/client-keys/123e4567-e89b-42d3-a456-426614174000/revoke'],
     ['POST', `/v1/requests/${id}/cancel`], ['POST', `/v1/requests/${id}/claim`],
     ['POST', `/v1/requests/${id}/result`],
   ];
@@ -171,6 +172,120 @@ test('all v1 routes require a valid key while health stays public', async () => 
   }
   assert.deepEqual((await app.inject({ method: 'GET', url: '/health' })).json(), { status: 'ok' });
   assert.equal((await app.inject({ method: 'GET', url: '/ready' })).statusCode, 200);
+  await app.close();
+});
+
+test('scoped client keys are least privilege, owner scoped, revocable, and survive restart without storing secrets', async () => {
+  const { db, path, core, clock } = setup();
+  const keys = new Map([['primary', 'a'.repeat(32)], ['secondary', 'b'.repeat(32)]]);
+  const app = createHttpServer(core, keys, () => true);
+  const primary = { authorization: `Bearer ${keys.get('primary')}` };
+  const secondary = { authorization: `Bearer ${keys.get('secondary')}` };
+  const issue = async (body: unknown, headers = primary) => app.inject({ method: 'POST', url: '/v1/client-keys', headers: { ...headers, 'content-type': 'application/json' },
+    payload: JSON.stringify(body) });
+  const created = await issue({ label: 'Worker', scopes: ['requests:create', 'requests:read'] });
+  assert.equal(created.statusCode, 201);
+  const issued = created.json() as { id: string; key: string; clientId: string; scopes: string[] };
+  assert.equal(issued.clientId, 'primary');
+  assert.match(issued.key, /^jgk_[A-Za-z0-9_-]{43}$/);
+  const stored = db.prepare('SELECT key_hash, scopes_json FROM client_keys WHERE id = ?').get(issued.id) as { key_hash: string; scopes_json: string };
+  assert.equal(stored.key_hash.length, 64);
+  assert.doesNotMatch(JSON.stringify(stored), new RegExp(issued.key));
+  const scoped = { authorization: `Bearer ${issued.key}` };
+  const request = (await app.inject({ method: 'POST', url: '/v1/requests', headers: scoped, payload: input('scoped:one') })).json();
+  assert.equal(request.clientId, 'primary');
+  const otherRequest = core.create('secondary', input('scoped:other')).request;
+  assert.equal((await app.inject({ method: 'GET', url: `/v1/requests/${otherRequest.id}`, headers: scoped })).statusCode, 404);
+  assert.equal((await app.inject({ method: 'GET', url: `/v1/requests/${request.id}`, headers: scoped })).statusCode, 200);
+  assert.equal((await app.inject({ method: 'GET', url: `/v1/requests/${request.id}/events`, headers: scoped })).statusCode, 200);
+  assert.equal((await app.inject({ method: 'GET', url: '/v1/requests', headers: scoped })).statusCode, 200);
+  for (const url of [`/v1/requests/${request.id}/cancel`, `/v1/requests/${request.id}/claim`, `/v1/requests/${request.id}/result`]) {
+    const denied = await app.inject({ method: 'POST', url, headers: scoped, payload: {} });
+    assert.equal(denied.statusCode, 403, url);
+    assert.equal(denied.json().error.code, 'insufficient_scope');
+  }
+  assert.equal((await app.inject({ method: 'GET', url: '/v1/client-keys', headers: scoped })).statusCode, 403);
+  assert.equal((await issue({ label: 'Escalation', scopes: ['requests:claim'] }, scoped)).statusCode, 403);
+  assert.equal((await app.inject({ method: 'POST', url: `/v1/client-keys/${issued.id}/revoke`, headers: scoped, payload: {} })).statusCode, 403);
+  assert.equal((await app.inject({ method: 'POST', url: `/v1/client-keys/${issued.id}/revoke`, headers: secondary, payload: {} })).statusCode, 404);
+  assert.equal((await app.inject({ method: 'GET', url: '/v1/client-keys', headers: secondary })).json().items.length, 0);
+  const readOnly = (await issue({ label: 'Observer', scopes: ['requests:read'] })).json();
+  const listed = (await app.inject({ method: 'GET', url: '/v1/client-keys?limit=1', headers: primary })).json();
+  assert.equal(listed.items.length, 1);
+  assert.equal(typeof listed.nextCursor, 'string');
+  assert.equal((await app.inject({ method: 'GET', url: `/v1/client-keys?limit=1&cursor=${listed.nextCursor}`, headers: primary })).json().items.length, 1);
+  assert.doesNotMatch(JSON.stringify(listed), new RegExp(issued.key));
+  assert.doesNotMatch(JSON.stringify(listed), new RegExp(readOnly.key));
+  assert.equal((await app.inject({ method: 'POST', url: '/v1/requests', headers: { authorization: `Bearer ${readOnly.key}` }, payload: input('scoped:two') })).statusCode, 403);
+  assert.equal((await app.inject({ method: 'GET', url: `/v1/requests/${request.id}`, headers: { authorization: `Bearer ${readOnly.key}` } })).statusCode, 200);
+  const revoke = await app.inject({ method: 'POST', url: `/v1/client-keys/${issued.id}/revoke`, headers: primary, payload: {} });
+  assert.equal(revoke.statusCode, 200);
+  assert.equal(typeof revoke.json().revokedAt, 'string');
+  assert.equal((await app.inject({ method: 'POST', url: `/v1/client-keys/${issued.id}/revoke`, headers: primary, payload: {} })).json().revokedAt, revoke.json().revokedAt);
+  assert.equal((await app.inject({ method: 'GET', url: '/v1/requests', headers: scoped })).statusCode, 401);
+  await app.close();
+  db.close();
+  const reopened = openDatabase(path); dbs.push(reopened);
+  const restarted = createHttpServer(new GatewayCore(reopened, clock), new Map([['primary', 'c'.repeat(32)]]), () => true);
+  assert.equal((await restarted.inject({ method: 'GET', url: '/v1/requests', headers: scoped })).statusCode, 401);
+  assert.equal((await restarted.inject({ method: 'GET', url: `/v1/requests/${request.id}`, headers: { authorization: `Bearer ${readOnly.key}` } })).statusCode, 200);
+  assert.equal((await restarted.inject({ method: 'GET', url: '/v1/client-keys', headers: { authorization: `Bearer ${'c'.repeat(32)}` } })).json().items.length, 2);
+  await restarted.close();
+  const removed = createHttpServer(new GatewayCore(reopened, clock), new Map([['secondary', keys.get('secondary')!]]), () => true);
+  assert.equal((await removed.inject({ method: 'GET', url: `/v1/requests/${request.id}`, headers: { authorization: `Bearer ${readOnly.key}` } })).statusCode, 401);
+  await removed.close();
+});
+
+test('every issued-key request scope authorizes only its intended operation', async () => {
+  const { core } = setup();
+  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
+  const bootstrap = { authorization: `Bearer ${'a'.repeat(32)}` };
+  const issue = async (scope: 'requests:create' | 'requests:read' | 'requests:cancel' | 'requests:claim' | 'requests:result') => {
+    const response = await app.inject({ method: 'POST', url: '/v1/client-keys', headers: bootstrap,
+      payload: { label: scope, scopes: [scope] } });
+    assert.equal(response.statusCode, 201);
+    return { authorization: `Bearer ${response.json().key as string}` };
+  };
+  const creator = await issue('requests:create');
+  const reader = await issue('requests:read');
+  const canceller = await issue('requests:cancel');
+  const claimant = await issue('requests:claim');
+  const reporter = await issue('requests:result');
+  const cancelled = (await app.inject({ method: 'POST', url: '/v1/requests', headers: creator, payload: input('scope:cancel') })).json();
+  assert.equal((await app.inject({ method: 'GET', url: `/v1/requests/${cancelled.id}`, headers: creator })).statusCode, 403);
+  assert.equal((await app.inject({ method: 'GET', url: `/v1/requests/${cancelled.id}`, headers: reader })).statusCode, 200);
+  assert.equal((await app.inject({ method: 'POST', url: `/v1/requests/${cancelled.id}/cancel`, headers: canceller, payload: {} })).statusCode, 200);
+  const approved = (await app.inject({ method: 'POST', url: '/v1/requests', headers: creator, payload: input('scope:claim') })).json();
+  const job = core.dueDeliveries().find((item) => item.id === approved.id)!;
+  core.deliverySucceeded(approved.id, '-100', '101');
+  core.decide(job.callbackRef, '-100', '101', '7', 'approved');
+  const claim = (await app.inject({ method: 'POST', url: `/v1/requests/${approved.id}/claim`, headers: claimant, payload: {} })).json();
+  assert.equal(claim.request.executionStatus, 'claimed');
+  assert.equal((await app.inject({ method: 'GET', url: `/v1/requests/${approved.id}`, headers: claimant })).statusCode, 403);
+  const report = await app.inject({ method: 'POST', url: `/v1/requests/${approved.id}/result`, headers: reporter,
+    payload: { claimToken: claim.claimToken, status: 'succeeded', summary: 'Done' } });
+  assert.equal(report.statusCode, 200);
+  assert.equal(report.json().executionStatus, 'succeeded');
+  assert.equal((await app.inject({ method: 'GET', url: `/v1/requests/${approved.id}`, headers: reporter })).statusCode, 403);
+  await app.close();
+});
+
+test('client key creation validates labels, scopes, and cursor without echoing submitted secrets', async () => {
+  const { core } = setup();
+  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
+  const headers = { authorization: `Bearer ${'a'.repeat(32)}` };
+  for (const body of [
+    { label: '', scopes: ['requests:read'] }, { label: 'x'.repeat(81), scopes: ['requests:read'] },
+    { label: 'bad\nlabel', scopes: ['requests:read'] }, { label: 'Bad', scopes: [] },
+    { label: 'Bad', scopes: ['requests:read', 'requests:read'] }, { label: 'Bad', scopes: ['keys:manage'] },
+    { label: 'Bad', scopes: ['requests:read'], clientId: 'secondary' },
+  ]) {
+    const response = await app.inject({ method: 'POST', url: '/v1/client-keys', headers, payload: body });
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().error.code, 'invalid_input');
+  }
+  for (const query of ['limit=0', 'limit=101', 'cursor=broken', 'extra=value'])
+    assert.equal((await app.inject({ method: 'GET', url: `/v1/client-keys?${query}`, headers })).statusCode, 400, query);
   await app.close();
 });
 
@@ -525,6 +640,14 @@ test('client methods complete a failed execution and preserve API errors', async
   const cancellable = await client.createRequest({ idempotencyKey: 'sdk:cancel', action: 'maintenance', title: 'Cancel me',
     description: 'No work required', expiresInSeconds: 60 });
   assert.equal((await client.cancel(cancellable.id)).status, 'cancelled');
+  const issued = await client.createClientKey({ label: 'SDK reader', scopes: ['requests:read'] });
+  const reader = new ApprovalClient({ baseUrl: 'http://local', apiKey: issued.key, fetch: mockFetch(app) });
+  assert.equal((await reader.getRequest(request.id)).id, request.id);
+  await assert.rejects(reader.createRequest({ idempotencyKey: 'sdk:denied', action: 'maintenance', title: 'Denied',
+    description: 'No work', expiresInSeconds: 60 }), { status: 403, code: 'insufficient_scope' });
+  assert.deepEqual((await client.listClientKeys()).items.map((item) => item.id), [issued.id]);
+  assert.equal((await client.revokeClientKey(issued.id)).revokedAt === null, false);
+  await assert.rejects(reader.getRequest(request.id), { status: 401, code: 'unauthorized' });
   await app.close();
 });
 

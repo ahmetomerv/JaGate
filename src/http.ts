@@ -3,7 +3,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError, z } from 'zod';
 import type { GatewayCore } from './core.js';
 import { GatewayError } from './errors.js';
-import { createSchema } from './model.js';
+import { clientKeyScopes, createSchema, type ClientKeyScope } from './model.js';
 
 const idSchema = z.string().uuid();
 const listQuerySchema = z.object({
@@ -31,9 +31,24 @@ const resultSchema = z.object({
   status: z.enum(['succeeded', 'failed']),
   summary: z.string().trim().min(1).max(300).refine((s) => !/[\u0000-\u001f]/.test(s)),
 }).strict();
+const issueKeySchema = z.object({
+  label: z.string().trim().min(1).max(80).refine((value) => !/[\u0000-\u001f]/.test(value)),
+  scopes: z.array(z.enum(clientKeyScopes)).min(1).max(clientKeyScopes.length)
+    .refine((values) => new Set(values).size === values.length, 'scopes must be unique'),
+}).strict();
+const keyListQuerySchema = listQuerySchema.pick({ limit: true, cursor: true });
 
 declare module 'fastify' {
-  interface FastifyRequest { clientId: string }
+  interface FastifyRequest { clientId: string; clientScopes: ReadonlySet<ClientKeyScope> | null; isBootstrapKey: boolean }
+}
+
+function requireScope(request: { clientScopes: ReadonlySet<ClientKeyScope> | null; isBootstrapKey: boolean }, scope: ClientKeyScope): void {
+  if (!request.isBootstrapKey && !request.clientScopes?.has(scope))
+    throw new GatewayError('insufficient_scope', 403, `client key requires ${scope} scope`);
+}
+
+function requireBootstrapKey(request: { isBootstrapKey: boolean }): void {
+  if (!request.isBootstrapKey) throw new GatewayError('insufficient_scope', 403, 'bootstrap client key required');
 }
 
 function clientIdFor(header: string | undefined, clientKeys: ReadonlyMap<string, string>): string | undefined {
@@ -65,17 +80,27 @@ export function createHttpServer(core: GatewayCore, clientKeys: ReadonlyMap<stri
   });
   app.register(async (v1) => {
     v1.decorateRequest('clientId', '');
+    v1.decorateRequest('clientScopes', null);
+    v1.decorateRequest('isBootstrapKey', false);
     v1.addHook('onRequest', async (request, reply) => {
       const clientId = clientIdFor(request.headers.authorization, clientKeys);
-      if (!clientId) return reply.code(401).send({ error: { code: 'unauthorized', message: 'valid client bearer key required' } });
-      request.clientId = clientId;
+      if (clientId) { request.clientId = clientId; request.isBootstrapKey = true; return; }
+      const header = request.headers.authorization;
+      const key = header?.startsWith('Bearer ') && header.length <= 256 ? header.slice(7) : '';
+      const stored = /^jgk_[A-Za-z0-9_-]{43}$/.test(key) ? core.authenticateClientKey(key) : undefined;
+      if (!stored || !clientKeys.has(stored.clientId))
+        return reply.code(401).send({ error: { code: 'unauthorized', message: 'valid client bearer key required' } });
+      request.clientId = stored.clientId;
+      request.clientScopes = new Set(stored.scopes);
     });
     v1.post('/requests', async (request, reply) => {
+      requireScope(request, 'requests:create');
       if (!core.storageReady() || !telegramReady()) throw new GatewayError('not_ready', 503, 'gateway is not ready to accept requests');
       const { request: created, created: isNew } = core.create(request.clientId, createSchema.parse(request.body));
       return reply.code(isNew ? 201 : 200).send(created);
     });
     v1.get('/requests', async (request) => {
+      requireScope(request, 'requests:read');
       const { cursor, ...filters } = listQuerySchema.parse(request.query);
       const before = decodeCursor(cursor);
       return core.list(request.clientId, {
@@ -86,18 +111,44 @@ export function createHttpServer(core: GatewayCore, clientKeys: ReadonlyMap<stri
         ...(before ? { before } : {}),
       });
     });
-    v1.get('/requests/:id', async (request) => core.get(request.clientId, idSchema.parse((request.params as { id: string }).id)));
+    v1.get('/requests/:id', async (request) => {
+      requireScope(request, 'requests:read');
+      return core.get(request.clientId, idSchema.parse((request.params as { id: string }).id));
+    });
     v1.get('/requests/:id/events', async (request) => {
+      requireScope(request, 'requests:read');
       const id = idSchema.parse((request.params as { id: string }).id);
       const { limit, cursor } = eventsQuerySchema.parse(request.query);
       return core.events(request.clientId, id, { limit, ...(cursor ? { after: Number(cursor) } : {}) });
     });
-    v1.post('/requests/:id/cancel', async (request) => core.cancel(request.clientId, idSchema.parse((request.params as { id: string }).id)));
-    v1.post('/requests/:id/claim', async (request) => core.claim(request.clientId, idSchema.parse((request.params as { id: string }).id)));
+    v1.post('/requests/:id/cancel', async (request) => {
+      requireScope(request, 'requests:cancel');
+      return core.cancel(request.clientId, idSchema.parse((request.params as { id: string }).id));
+    });
+    v1.post('/requests/:id/claim', async (request) => {
+      requireScope(request, 'requests:claim');
+      return core.claim(request.clientId, idSchema.parse((request.params as { id: string }).id));
+    });
     v1.post('/requests/:id/result', async (request) => {
+      requireScope(request, 'requests:result');
       const id = idSchema.parse((request.params as { id: string }).id);
       const body = resultSchema.parse(request.body);
       return core.report(request.clientId, id, body.claimToken, body.status, body.summary);
+    });
+    v1.post('/client-keys', async (request, reply) => {
+      requireBootstrapKey(request);
+      const { label, scopes } = issueKeySchema.parse(request.body);
+      return reply.code(201).send(core.issueClientKey(request.clientId, label, scopes));
+    });
+    v1.get('/client-keys', async (request) => {
+      requireBootstrapKey(request);
+      const { limit, cursor } = keyListQuerySchema.parse(request.query);
+      const before = decodeCursor(cursor);
+      return core.listClientKeys(request.clientId, { limit, ...(before ? { before } : {}) });
+    });
+    v1.post('/client-keys/:id/revoke', async (request) => {
+      requireBootstrapKey(request);
+      return core.revokeClientKey(request.clientId, idSchema.parse((request.params as { id: string }).id));
     });
   }, { prefix: '/v1' });
   return app;

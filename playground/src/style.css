@@ -29,6 +29,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .environment-address { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: #8a97a5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 270px; }
 .inline-field { display: flex; align-items: center; gap: 7px; color: #7b8997; font-weight: 600; font-size: 11px; white-space: nowrap; }
 .inline-field select { border: 1px solid #d9e1e9; border-radius: 5px; background: #fff; color: #283d50; padding: 6px 25px 6px 9px; min-width: 115px; }
+.issued-key-field input { min-width: 190px; max-width: 280px; border: 1px solid #d9e1e9; border-radius: 5px; padding: 6px 9px; color: #283d50; }
+.issued-key-field .subtle-button { white-space: nowrap; }
 .global-notice { background: #fff4e9; border-bottom: 1px solid #edcda5; color: #8b5325; padding: 10px 24px; }
 .workspace { display: grid; grid-template-columns: 235px minmax(0,1fr); flex: 1; min-height: calc(100vh - 114px); }
 .sidebar { background: #fbfcfd; border-right: 1px solid #dfe5eb; display: flex; flex-direction: column; min-width: 0; }
@@ -95,6 +97,10 @@ h2 { font-size: 18px; }
 .form-grid textarea { resize: vertical; line-height: 1.5; }
 .form-grid input:focus,.form-grid textarea:focus,.form-grid select:focus { border-color: #5a95e2; box-shadow: 0 0 0 2px #ddeafe; }
 .form-grid .code-input,.preview-body pre,.response-code pre { font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.scope-fieldset { display: flex; flex-wrap: wrap; gap: 10px 18px; max-width: 900px; margin: 18px 0 0; padding: 12px 14px; border: 1px solid #dfe6ee; border-radius: 5px; }
+.scope-fieldset legend { padding: 0 5px; color: #5f7284; font-size: 11px; font-weight: 700; }
+.scope-option { display: inline-flex; align-items: center; gap: 7px; color: #526575; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.scope-option input { margin: 0; accent-color: #2a6dc2; }
 .label-type { margin-left: 4px; color: #a5b0bb; font-weight: 500; }
 .field-aside { align-self: end; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding-bottom: 4px; color: #a4afba; font-size: 11px; }
 .subtle-button { color: #2a6dc2; background: transparent; border: 0; font-weight: 600; padding: 0; font-size: 11px; }
@@ -195,6 +201,8 @@ h2 { font-size: 18px; }
   .sidebar { border-right: 0; border-bottom: 1px solid #dfe5eb; }
   .sidebar-section:first-child { display: flex; align-items: center; gap: 2px; padding: 9px 15px; overflow-x: auto; }
   .sidebar-section:first-child .sidebar-heading { display: none; }
+  .key-section,.utility-section { display: flex; align-items: center; gap: 2px; padding: 9px 15px; overflow-x: auto; }
+  .key-section .sidebar-heading,.utility-section .sidebar-heading { display: none; }
   .endpoint-item { width: auto; flex: none; padding: 7px 9px; }
   .recent-section { display: block; padding: 12px 15px; max-height: 180px; }
   .sidebar-footer { display: none; }
@@ -207,6 +215,8 @@ h2 { font-size: 18px; }
   .environment-left,.environment-right { width: 100%; }
   .inline-field { flex: 1; }
   .inline-field select { flex: 1; min-width: 0; }
+  .issued-key-field { flex-basis: 100%; }
+  .issued-key-field input { flex: 1; min-width: 0; }
   .workbench { padding: 0 9px 20px; }
   .section-title-row,.response-heading { padding: 20px 16px 15px; }
   .request-bar { margin: 0 16px 16px; }

@@ -15,9 +15,11 @@ const modeSchema = z.enum(['simulated', 'live']);
 const commandSchema = z.object({
   mode: modeSchema,
   clientId: z.string().min(1).max(32),
-  operation: z.enum(['create', 'list', 'get', 'events', 'cancel', 'claim', 'result', 'health', 'ready']),
-  auth: z.enum(['valid', 'missing', 'invalid']).default('valid'),
+  operation: z.enum(['create', 'list', 'get', 'events', 'cancel', 'claim', 'result', 'keyCreate', 'keyList', 'keyRevoke', 'health', 'ready']),
+  auth: z.enum(['valid', 'scoped', 'missing', 'invalid']).default('valid'),
+  scopedKey: z.string().max(128).optional(),
   requestId: z.string().max(128).optional(),
+  keyId: z.string().max(128).optional(),
   filters: z.object({
     status: z.string().max(32).optional(),
     deliveryStatus: z.string().max(32).optional(),
@@ -26,6 +28,7 @@ const commandSchema = z.object({
     cursor: z.string().max(256).optional(),
   }).strict().optional(),
   eventPage: z.object({ limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(15).optional() }).strict().optional(),
+  keyPage: z.object({ limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(256).optional() }).strict().optional(),
   payload: z.unknown().optional(),
 }).strict();
 
@@ -90,23 +93,28 @@ export function createPlayground(options: PlaygroundOptions) {
   app.post('/api/execute', async (request, reply) => {
     const parsed = commandSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid playground command' });
-    const { mode, clientId, operation, auth, requestId, filters, eventPage, payload } = parsed.data;
+    const { mode, clientId, operation, auth, scopedKey, requestId, keyId, filters, eventPage, keyPage, payload } = parsed.data;
     if (mode === 'simulated' ? !clientSchema.safeParse(clientId).success : !liveKeys?.has(clientId))
       return reply.code(400).send({ error: 'Unknown client for this mode' });
     if (['get', 'events', 'cancel', 'claim', 'result'].includes(operation) && !requestId)
       return reply.code(400).send({ error: 'Select or enter a request ID' });
+    if (operation === 'keyRevoke' && !keyId) return reply.code(400).send({ error: 'Select or enter a client key ID' });
+    if (auth === 'scoped' && !scopedKey) return reply.code(400).send({ error: 'Enter an issued client key' });
     const path = operation === 'health' || operation === 'ready' ? `/${operation}`
       : operation === 'create' || operation === 'list' ? '/v1/requests'
+        : operation === 'keyCreate' || operation === 'keyList' ? '/v1/client-keys'
+          : operation === 'keyRevoke' ? `/v1/client-keys/${encodeURIComponent(keyId!)}/revoke`
         : `/v1/requests/${encodeURIComponent(requestId!)}` + (operation === 'get' ? '' : `/${operation}`);
     const query = new URLSearchParams();
     if (operation === 'list' && filters) for (const [key, value] of Object.entries(filters)) if (value !== undefined && value !== '') query.set(key, String(value));
     if (operation === 'events' && eventPage) for (const [key, value] of Object.entries(eventPage)) if (value !== undefined && value !== '') query.set(key, String(value));
+    if (operation === 'keyList' && keyPage) for (const [key, value] of Object.entries(keyPage)) if (value !== undefined && value !== '') query.set(key, String(value));
     const url = `${path}${query.size ? `?${query}` : ''}`;
-    const method = ['list', 'get', 'events', 'health', 'ready'].includes(operation) ? 'GET' : 'POST';
+    const method = ['list', 'get', 'events', 'keyList', 'health', 'ready'].includes(operation) ? 'GET' : 'POST';
     const key = mode === 'simulated' ? simulatedKeys.get(clientId as ClientId)! : liveKeys!.get(clientId)!;
-    const authorization = auth === 'missing' ? undefined : `Bearer ${auth === 'invalid' ? 'invalid-playground-key' : key}`;
+    const authorization = auth === 'missing' ? undefined : `Bearer ${auth === 'invalid' ? 'invalid-playground-key' : auth === 'scoped' ? scopedKey : key}`;
     const headers = { ...(authorization ? { authorization } : {}), ...(method === 'POST' ? { 'content-type': 'application/json' } : {}) };
-    const body = operation === 'create' || operation === 'result' ? payload : {};
+    const body = operation === 'create' || operation === 'result' || operation === 'keyCreate' ? payload : {};
 
     if (mode === 'simulated') {
       const result = await simulatedApi.inject({ method, url, headers, ...(method === 'POST' ? { payload: JSON.stringify(body ?? {}) } : {}) });
