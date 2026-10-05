@@ -41,24 +41,56 @@ const input = (idempotencyKey = 'playground:test') => ({
 });
 
 function command(operation: string, extras: Record<string, unknown> = {}) {
-  return { mode: 'simulated', clientId: 'website', operation, auth: 'valid', ...extras };
+  return { mode: 'simulated', clientId: 'ci-pipeline', operation, auth: 'valid', ...extras };
 }
+
+test('three simulated clients have distinct, usable approval scenarios', async () => {
+  const { app } = setup();
+  const boot = (await app.inject({ method: 'GET', url: '/api/bootstrap' })).json();
+  const clients = ['ci-pipeline', 'cloud-ops', 'billing-service'];
+  assert.deepEqual(boot.simulatedClients, clients);
+  const expectedActions = ['deploy', 'delete-snapshot', 'issue-refund'];
+  for (const [index, clientId] of clients.entries()) {
+    const example = boot.simulatedExamples[clientId];
+    assert.ok(example.label);
+    assert.ok(example.scenario);
+    assert.equal(example.request.action, expectedActions[index]);
+    const created = (await call(app, boot.token, '/api/execute', command('create', {
+      clientId, payload: example.request,
+    }))).json();
+    assert.equal(created.status, 201);
+    assert.equal(created.body.clientId, clientId);
+    assert.equal(created.body.title, example.request.title);
+    const otherClient = clients[(index + 1) % clients.length];
+    assert.equal((await call(app, boot.token, '/api/execute', command('get', {
+      clientId: otherClient, requestId: created.body.id,
+    }))).json().status, 404);
+    const approved = (await call(app, boot.token, '/api/decide', {
+      clientId, requestId: created.body.id, decision: 'approve', actor: 'allowed',
+    })).json();
+    assert.equal(approved.request.status, 'approved');
+  }
+});
 
 test('playground guards commands and exercises HTTP auth, ownership and idempotency', async () => {
   const { app } = setup();
   assert.equal((await app.inject({ method: 'POST', url: '/api/execute', payload: command('create', { payload: input() }) })).statusCode, 403);
   const session = await token(app);
+  assert.deepEqual((await app.inject({ method: 'GET', url: '/api/bootstrap' })).json().simulatedClients,
+    ['ci-pipeline', 'cloud-ops', 'billing-service']);
   const first = (await call(app, session, '/api/execute', command('create', { payload: input() }))).json() as { status: number; body: { id: string } };
   assert.equal(first.status, 201);
   const id = first.body.id;
   const listed = (await call(app, session, '/api/execute', command('list', { filters: { deliveryStatus: 'delivered' } }))).json();
   assert.equal(listed.status, 200);
   assert.deepEqual(listed.body.items.map((item: { id: string }) => item.id), [id]);
-  assert.deepEqual((await call(app, session, '/api/execute', command('list', { clientId: 'backups' }))).json().body.items, []);
+  assert.deepEqual((await call(app, session, '/api/execute', command('list', { clientId: 'cloud-ops' }))).json().body.items, []);
+  assert.deepEqual((await call(app, session, '/api/execute', command('list', { clientId: 'billing-service' }))).json().body.items, []);
   assert.equal((await call(app, session, '/api/execute', command('list', { auth: 'missing' }))).json().status, 401);
   assert.equal((await call(app, session, '/api/execute', command('create', { payload: input() }))).json().status, 200);
   assert.equal((await call(app, session, '/api/execute', command('create', { payload: { ...input(), title: 'Changed' } }))).json().status, 409);
-  assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id, clientId: 'backups' }))).json().status, 404);
+  assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id, clientId: 'cloud-ops' }))).json().status, 404);
+  assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id, clientId: 'billing-service' }))).json().status, 404);
   assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id, auth: 'missing' }))).json().status, 401);
   assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id, auth: 'invalid' }))).json().status, 401);
   const timeline = (await call(app, session, '/api/execute', command('events', { requestId: id, eventPage: { limit: 1 } }))).json();
@@ -66,7 +98,7 @@ test('playground guards commands and exercises HTTP auth, ownership and idempote
   assert.deepEqual(timeline.body.items.map((event: { type: string }) => event.type), ['request.created']);
   assert.equal(timeline.body.nextCursor, '1');
   assert.deepEqual((await call(app, session, '/api/execute', command('events', { requestId: id, eventPage: { cursor: '1' } }))).json().body.items.map((event: { type: string }) => event.type), ['delivery.delivered']);
-  assert.equal((await call(app, session, '/api/execute', command('events', { requestId: id, clientId: 'backups' }))).json().status, 404);
+  assert.equal((await call(app, session, '/api/execute', command('events', { requestId: id, clientId: 'cloud-ops' }))).json().status, 404);
   assert.equal((await call(app, session, '/api/execute', command('events', { requestId: id, auth: 'missing' }))).json().status, 401);
 });
 
@@ -96,10 +128,10 @@ test('simulated decisions honor approvers, claims and one-time results across re
   const session = await token(app);
   const created = (await call(app, session, '/api/execute', command('create', { payload: input('playground:decision') }))).json();
   const id = created.body.id as string;
-  const outsider = (await call(app, session, '/api/decide', { requestId: id, clientId: 'website', decision: 'approve', actor: 'outsider' })).json();
+  const outsider = (await call(app, session, '/api/decide', { requestId: id, clientId: 'ci-pipeline', decision: 'approve', actor: 'outsider' })).json();
   assert.match(outsider.message, /not authorized/);
   assert.equal(outsider.request.status, 'pending');
-  const approved = (await call(app, session, '/api/decide', { requestId: id, clientId: 'website', decision: 'approve', actor: 'allowed' })).json();
+  const approved = (await call(app, session, '/api/decide', { requestId: id, clientId: 'ci-pipeline', decision: 'approve', actor: 'allowed' })).json();
   assert.equal(approved.request.status, 'approved');
   const claim = (await call(app, session, '/api/execute', command('claim', { requestId: id }))).json();
   assert.equal(claim.status, 200);
@@ -128,11 +160,11 @@ test('simulated clock expires pending requests and cancellation stops decisions'
   const id = expiring.body.id as string;
   assert.equal((await call(app, session, '/api/advance-time', { seconds: 61 })).json().expired, 1);
   assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id }))).json().body.status, 'expired');
-  assert.equal((await call(app, session, '/api/decide', { requestId: id, clientId: 'website', decision: 'approve', actor: 'allowed' })).json().request.status, 'expired');
+  assert.equal((await call(app, session, '/api/decide', { requestId: id, clientId: 'ci-pipeline', decision: 'approve', actor: 'allowed' })).json().request.status, 'expired');
   const pending = (await call(app, session, '/api/execute', command('create', { payload: input('playground:cancel') }))).json();
   const pendingId = pending.body.id as string;
   assert.equal((await call(app, session, '/api/execute', command('cancel', { requestId: pendingId }))).json().body.status, 'cancelled');
-  assert.equal((await call(app, session, '/api/decide', { requestId: pendingId, clientId: 'website', decision: 'approve', actor: 'allowed' })).json().request.status, 'cancelled');
+  assert.equal((await call(app, session, '/api/decide', { requestId: pendingId, clientId: 'ci-pipeline', decision: 'approve', actor: 'allowed' })).json().request.status, 'cancelled');
 });
 
 test('playground issues and revokes scoped keys through simulated HTTP routes', async () => {
@@ -142,7 +174,7 @@ test('playground issues and revokes scoped keys through simulated HTTP routes', 
     payload: { label: 'Playground reader', scopes: ['requests:read'] },
   }))).json();
   assert.equal(created.status, 201);
-  assert.equal(created.body.clientId, 'website');
+  assert.equal(created.body.clientId, 'ci-pipeline');
   const keyId = created.body.id as string;
   const scopedKey = created.body.key as string;
   const listed = (await call(app, session, '/api/execute', command('keyList', { keyPage: { limit: 1 } }))).json();
@@ -154,7 +186,7 @@ test('playground issues and revokes scoped keys through simulated HTTP routes', 
   assert.equal((await call(app, session, '/api/execute', command('create', { auth: 'scoped', scopedKey,
     payload: input('scoped:denied') }))).json().status, 403);
   assert.equal((await call(app, session, '/api/execute', command('keyList', { auth: 'scoped', scopedKey }))).json().status, 403);
-  assert.equal((await call(app, session, '/api/execute', command('keyRevoke', { keyId, clientId: 'backups' }))).json().status, 404);
+  assert.equal((await call(app, session, '/api/execute', command('keyRevoke', { keyId, clientId: 'cloud-ops' }))).json().status, 404);
   assert.equal((await call(app, session, '/api/execute', command('keyRevoke', { keyId }))).json().status, 200);
   assert.equal((await call(app, session, '/api/execute', command('list', { auth: 'scoped', scopedKey }))).json().status, 401);
 });
@@ -184,7 +216,7 @@ test('playground can inspect key expiry and client audit records in simulation',
     auditPage: { keyId: issued.body.id, limit: 1, cursor: audit.body.nextCursor },
   }))).json();
   assert.equal(older.body.items[0].type, 'key.issued');
-  assert.deepEqual((await call(app, boot.token, '/api/execute', command('audit', { clientId: 'backups' }))).json().body.items, []);
+  assert.deepEqual((await call(app, boot.token, '/api/execute', command('audit', { clientId: 'cloud-ops' }))).json().body.items, []);
   assert.equal((await call(app, boot.token, '/api/execute', command('audit', { auth: 'scoped', scopedKey }))).json().status, 403);
   assert.doesNotMatch(JSON.stringify(audit), new RegExp(scopedKey));
   assert.equal((await call(app, boot.token, '/api/advance-time', { seconds: 60 })).json().expired >= 0, true);

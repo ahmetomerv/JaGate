@@ -31,6 +31,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .inline-field select { border: 1px solid #d9e1e9; border-radius: 5px; background: #fff; color: #283d50; padding: 6px 25px 6px 9px; min-width: 115px; }
 .issued-key-field input { min-width: 190px; max-width: 280px; border: 1px solid #d9e1e9; border-radius: 5px; padding: 6px 9px; color: #283d50; }
 .issued-key-field .subtle-button { white-space: nowrap; }
+.client-context { padding: 9px 24px; border-bottom: 1px solid #dfe5eb; background: #f8fafc; color: #607386; font-size: 11px; line-height: 1.5; }
+.client-context strong { color: #2c465e; }
+.client-context code { color: #476b91; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .global-notice { background: #fff4e9; border-bottom: 1px solid #edcda5; color: #8b5325; padding: 10px 24px; }
 .workspace { display: grid; grid-template-columns: 235px minmax(0,1fr); flex: 1; min-height: calc(100vh - 114px); }
 .sidebar { background: #fbfcfd; border-right: 1px solid #dfe5eb; display: flex; flex-direction: column; min-width: 0; }
@@ -221,6 +224,7 @@ h2 { font-size: 18px; }
   .app-header { padding: 0 14px; }
   .header-caption,.header-right a,.dev-badge,.environment-label { display: none; }
   .environment-bar { padding: 8px 14px; }
+  .client-context { padding: 9px 14px; }
   .environment-left,.environment-right { width: 100%; }
   .inline-field { flex: 1; }
   .inline-field select { flex: 1; min-width: 0; }

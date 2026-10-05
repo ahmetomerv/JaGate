@@ -4,12 +4,36 @@ import { z } from 'zod';
 import { parseClientKeys, type TelegramRoute } from '../src/config.js';
 import { GatewayCore } from '../src/core.js';
 import { createHttpServer } from '../src/http.js';
+import type { CreateRequestInput } from '../src/model.js';
 import { openDatabase } from '../src/storage.js';
 import { TelegramGateway, type TelegramTransport, type Update } from '../src/telegram.js';
 
-const clients = ['website', 'backups'] as const;
+const clients = ['ci-pipeline', 'cloud-ops', 'billing-service'] as const;
 type ClientId = typeof clients[number];
 const clientSchema = z.enum(clients);
+const simulatedExamples: Record<ClientId, { label: string; scenario: string; request: CreateRequestInput }> = {
+  'ci-pipeline': {
+    label: 'CI/CD pipeline', scenario: 'deploy a new API release to production',
+    request: { idempotencyKey: 'deploy:release-1-8-0', action: 'deploy', title: 'Deploy API to production',
+      description: 'The deployment pipeline is ready to release API version 1.8.0 to production.',
+      details: [{ label: 'Environment', value: 'production' }, { label: 'Release', value: 'v1.8.0' }],
+      metadata: { source: 'ci-pipeline', repository: 'acme/api' }, expiresInSeconds: 900 },
+  },
+  'cloud-ops': {
+    label: 'Cloud operations', scenario: 'delete an old database snapshot',
+    request: { idempotencyKey: 'snapshot:db-prod-2026-08-01', action: 'delete-snapshot', title: 'Delete old database snapshot',
+      description: 'The cloud operations tool is ready to remove a database snapshot after retention review.',
+      details: [{ label: 'Snapshot', value: 'db-prod-2026-08-01' }, { label: 'Region', value: 'eu-central-1' }],
+      metadata: { source: 'cloud-ops', ticket: 'OPS-124' }, expiresInSeconds: 900 },
+  },
+  'billing-service': {
+    label: 'Billing service', scenario: 'issue a high-value customer refund',
+    request: { idempotencyKey: 'refund:INV-2048', action: 'issue-refund', title: 'Issue customer refund',
+      description: 'The billing service is ready to issue a EUR 1,200 refund for a customer invoice.',
+      details: [{ label: 'Invoice', value: 'INV-2048' }, { label: 'Amount', value: 'EUR 1,200' }],
+      metadata: { source: 'billing-service', invoiceId: 'INV-2048' }, expiresInSeconds: 900 },
+  },
+};
 const idSchema = z.string().uuid();
 const modeSchema = z.enum(['simulated', 'live']);
 const commandSchema = z.object({
@@ -37,8 +61,9 @@ const commandSchema = z.object({
 }).strict();
 
 const routes: ReadonlyMap<ClientId, TelegramRoute> = new Map([
-  ['website', { chatId: '-1001', approverIds: new Set(['101']) }],
-  ['backups', { chatId: '-1002', approverIds: new Set(['202']) }],
+  ['ci-pipeline', { chatId: '-1001', approverIds: new Set(['101']) }],
+  ['cloud-ops', { chatId: '-1002', approverIds: new Set(['202']) }],
+  ['billing-service', { chatId: '-1003', approverIds: new Set(['303']) }],
 ]);
 
 class SimulatedTelegram implements TelegramTransport {
@@ -90,6 +115,7 @@ export function createPlayground(options: PlaygroundOptions) {
   app.get('/api/bootstrap', async (_request, reply) => reply.header('Cache-Control', 'no-store').send({
     token: accessToken,
     simulatedClients: clients,
+    simulatedExamples,
     liveClients: liveKeys ? [...liveKeys.keys()] : [],
     gatewayUrl: liveUrl,
     simulatedNow: new Date(Date.now() + clockOffsetMs).toISOString(),

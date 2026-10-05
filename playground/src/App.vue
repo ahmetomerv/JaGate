@@ -16,11 +16,18 @@ type ListPage = { items: RequestView[]; nextCursor: string | null };
 type RequestEvent = { sequence: number; type: string; occurredAt: string; actorId: string | null; attempt: number | null };
 type EventPage = { items: RequestEvent[]; nextCursor: string | null };
 type Entry = { time: string; label: string; status: number; body: unknown };
-type Bootstrap = { token: string; simulatedClients: string[]; liveClients: string[]; gatewayUrl: string; simulatedNow: string };
+type ExampleRequest = { idempotencyKey: string; action: string; title: string; description: string;
+  details: Array<{ label: string; value: string }>; metadata: Record<string, unknown>; expiresInSeconds: number };
+type SimulatedExample = { label: string; scenario: string; request: ExampleRequest };
+type Bootstrap = { token: string; simulatedClients: string[]; simulatedExamples: Record<string, SimulatedExample>;
+  liveClients: string[]; gatewayUrl: string; simulatedNow: string };
+const defaultRequest: ExampleRequest = { idempotencyKey: 'playground:local-test', action: 'test-action',
+  title: 'Test a local approval', description: 'A harmless request made from the JaGate playground.',
+  details: [{ label: 'Environment', value: 'local' }], metadata: { source: 'playground' }, expiresInSeconds: 900 };
 
 const bootstrap = ref<Bootstrap | null>(null);
 const mode = ref<Mode>('simulated');
-const clientId = ref('website');
+const clientId = ref('');
 const auth = ref<'valid' | 'scoped' | 'missing' | 'invalid'>('valid');
 const scopedKey = ref('');
 const showScopedKey = ref(false);
@@ -59,13 +66,13 @@ const eventCursorStack = ref<string[]>([]);
 const entries = ref<Entry[]>([]);
 const busy = ref(false);
 const error = ref('');
-const key = ref(`playground:${Date.now()}`);
-const action = ref('test-action');
-const title = ref('Test a local approval');
-const description = ref('A harmless request made from the JaGate playground.');
-const expiresInSeconds = ref(900);
-const detailsText = ref('[{"label":"Environment","value":"local"}]');
-const metadataText = ref('{"source":"playground"}');
+const key = ref(defaultRequest.idempotencyKey);
+const action = ref(defaultRequest.action);
+const title = ref(defaultRequest.title);
+const description = ref(defaultRequest.description);
+const expiresInSeconds = ref(defaultRequest.expiresInSeconds);
+const detailsText = ref(JSON.stringify(defaultRequest.details));
+const metadataText = ref(JSON.stringify(defaultRequest.metadata));
 const actor = ref<'allowed' | 'outsider'>('allowed');
 const advanceSeconds = ref(61);
 const claimToken = ref('');
@@ -98,6 +105,7 @@ const keyEndpoints = endpoints.filter((item) => item.operation.startsWith('key')
 const utilityEndpoints = endpoints.filter((item) => ['health', 'ready'].includes(item.operation));
 
 const clients = computed(() => mode.value === 'simulated' ? bootstrap.value?.simulatedClients ?? [] : bootstrap.value?.liveClients ?? []);
+const simulatedExample = computed(() => mode.value === 'simulated' ? bootstrap.value?.simulatedExamples[clientId.value] : undefined);
 const selected = computed(() => [...history.value, ...(listPage.value?.items ?? [])].find((item) => item.id === requestId.value));
 const visibleEntry = computed(() => activeEntry.value === null ? undefined : entries.value[activeEntry.value]);
 const endpoint = computed(() => endpoints.find((item) => item.operation === operation.value)!);
@@ -156,6 +164,14 @@ watch([clientId, mode], () => {
   clearDisplayedResponse();
   error.value = '';
   history.value = [];
+  const example = simulatedExample.value?.request ?? defaultRequest;
+  key.value = example.idempotencyKey;
+  action.value = example.action;
+  title.value = example.title;
+  description.value = example.description;
+  expiresInSeconds.value = example.expiresInSeconds;
+  detailsText.value = JSON.stringify(example.details);
+  metadataText.value = JSON.stringify(example.metadata);
   void refreshHistory();
 });
 watch([requestId, clientId, mode, eventLimit], () => {
@@ -468,11 +484,12 @@ onMounted(async () => {
         <span class="environment-address">{{ mode === 'simulated' ? 'Local simulator · isolated database' : bootstrap?.gatewayUrl }}</span>
       </div>
       <div class="environment-right">
-        <label class="inline-field">Client <select v-model="clientId" :disabled="!clients.length"><option v-for="id in clients" :key="id" :value="id">{{ id }}</option></select></label>
+        <label class="inline-field">Client <select v-model="clientId" :disabled="!clients.length"><option v-for="id in clients" :key="id" :value="id">{{ mode === 'simulated' ? bootstrap?.simulatedExamples[id]?.label ?? id : id }}</option></select></label>
         <label class="inline-field">Auth <select v-model="auth"><option value="valid">Bootstrap key</option><option value="scoped">Issued key</option><option value="missing">Missing key</option><option value="invalid">Invalid key</option></select></label>
         <label v-if="auth === 'scoped'" class="inline-field issued-key-field">Issued key <input v-model="scopedKey" :type="showScopedKey ? 'text' : 'password'" autocomplete="off" spellcheck="false" placeholder="Paste the key returned once" /><button class="subtle-button" @click="showScopedKey = !showScopedKey">{{ showScopedKey ? 'Hide' : 'Show' }}</button></label>
       </div>
     </div>
+    <div v-if="simulatedExample" class="client-context"><strong>{{ simulatedExample.label }}</strong> (<code>{{ clientId }}</code>) is a client: an application or automation that asks JaGate for approval before it can {{ simulatedExample.scenario }}. Each client has its own requests, keys, Telegram chat, and approver. Selecting another client loads its sample request.</div>
 
     <div v-if="error" class="global-notice" role="alert">{{ error }}</div>
     <div v-if="mode === 'live' && !clients.length" class="global-notice">Live mode needs CLIENT_KEYS in your local .env and a running gateway.</div>
