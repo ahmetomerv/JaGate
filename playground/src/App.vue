@@ -43,7 +43,7 @@ const resultSummary = ref('Local test completed');
 const operation = ref<Operation>('create');
 const requestTab = ref<'body' | 'preview'>('body');
 const responseTab = ref<'body' | 'history'>('body');
-const activeEntry = ref(0);
+const activeEntry = ref<number | null>(null);
 const copied = ref(false);
 
 const endpoints: Array<{ operation: Operation; method: 'GET' | 'POST'; label: string; path: string }> = [
@@ -59,8 +59,7 @@ const endpoints: Array<{ operation: Operation; method: 'GET' | 'POST'; label: st
 
 const clients = computed(() => mode.value === 'simulated' ? bootstrap.value?.simulatedClients ?? [] : bootstrap.value?.liveClients ?? []);
 const selected = computed(() => [...history.value, ...(listPage.value?.items ?? [])].find((item) => item.id === requestId.value));
-const latest = computed(() => entries.value[0]);
-const visibleEntry = computed(() => entries.value[activeEntry.value] ?? latest.value);
+const visibleEntry = computed(() => activeEntry.value === null ? undefined : entries.value[activeEntry.value]);
 const endpoint = computed(() => endpoints.find((item) => item.operation === operation.value)!);
 const listFilters = computed(() => ({
   ...(listStatus.value ? { status: listStatus.value } : {}),
@@ -86,17 +85,37 @@ watch([listStatus, listDeliveryStatus, listExecutionStatus, listLimit, clientId,
   listCursorStack.value = [];
   listPage.value = null;
 });
-watch([clientId, mode], () => { history.value = []; void refreshHistory(); });
+watch([clientId, mode], () => {
+  clearDisplayedResponse();
+  error.value = '';
+  history.value = [];
+  void refreshHistory();
+});
 
 function parsePreview(value: string) {
   try { return JSON.parse(value) as unknown; } catch { return value; }
 }
 
-function selectRequest(item: RequestView) {
-  if (requestId.value !== item.id) claimToken.value = '';
-  requestId.value = item.id;
-  operation.value = 'get';
+function clearDisplayedResponse() {
+  activeEntry.value = null;
+  responseTab.value = 'body';
+  copied.value = false;
+}
+
+function selectOperation(next: Operation) {
+  if (next !== operation.value) clearDisplayedResponse();
+  operation.value = next;
   requestTab.value = 'body';
+  error.value = '';
+}
+
+function selectRequest(item: RequestView) {
+  if (requestId.value !== item.id) {
+    claimToken.value = '';
+    clearDisplayedResponse();
+  }
+  requestId.value = item.id;
+  selectOperation('get');
 }
 
 function remember(item: RequestView) {
@@ -114,10 +133,15 @@ async function api(path: string, body?: unknown) {
   return data;
 }
 
-function record(label: string, status: number, body: unknown) {
+function record(label: string, status: number, body: unknown, show = true) {
   entries.value = [{ time: new Date().toLocaleTimeString(), label, status, body }, ...entries.value].slice(0, 20);
-  activeEntry.value = 0;
-  responseTab.value = 'body';
+  if (show) {
+    activeEntry.value = 0;
+    responseTab.value = 'body';
+    copied.value = false;
+  } else if (activeEntry.value !== null) {
+    activeEntry.value = activeEntry.value + 1 < entries.value.length ? activeEntry.value + 1 : null;
+  }
 }
 
 async function copyResponse() {
@@ -145,36 +169,40 @@ function changeMode(next: Mode) {
   error.value = '';
 }
 
-async function execute(operation: Operation) {
+async function execute(sentOperation: Operation) {
   if (!bootstrap.value || busy.value) return;
   error.value = '';
   const sentMode = mode.value;
   const sentClient = clientId.value;
   let payload: unknown;
   try {
-    if (operation === 'create') payload = {
+    if (sentOperation === 'create') payload = {
       idempotencyKey: key.value, action: action.value, title: title.value, description: description.value,
       details: JSON.parse(detailsText.value), metadata: JSON.parse(metadataText.value), expiresInSeconds: Number(expiresInSeconds.value),
     };
-    if (operation === 'result') payload = { claimToken: claimToken.value, status: resultStatus.value, summary: resultSummary.value };
+    if (sentOperation === 'result') payload = { claimToken: claimToken.value, status: resultStatus.value, summary: resultSummary.value };
     busy.value = true;
     const response = await api('/api/execute', {
-      mode: sentMode, clientId: sentClient, operation, auth: auth.value, requestId: requestId.value,
-      ...(operation === 'list' ? { filters: listFilters.value } : {}), payload,
+      mode: sentMode, clientId: sentClient, operation: sentOperation, auth: auth.value, requestId: requestId.value,
+      ...(sentOperation === 'list' ? { filters: listFilters.value } : {}), payload,
     }) as { status: number; body: Record<string, unknown> };
-    if (sentMode !== mode.value || sentClient !== clientId.value) return;
-    record(`${operation.toUpperCase()} · ${clientId.value}`, response.status, response.body);
-    if (operation === 'list') listPage.value = response.status === 200 ? response.body as unknown as ListPage : null;
-    const view = operation === 'claim' ? response.body.request : response.body;
+    const current = sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value;
+    record(`${sentOperation.toUpperCase()} · ${sentClient} · ${sentMode}`, response.status, response.body, current);
+    if (!current) return;
+    if (sentOperation === 'list') listPage.value = response.status === 200 ? response.body as unknown as ListPage : null;
+    const view = sentOperation === 'claim' ? response.body.request : response.body;
     if (view && typeof view === 'object' && 'id' in view) {
       const item = view as RequestView;
-      if (requestId.value !== item.id && operation !== 'claim') claimToken.value = '';
+      if (requestId.value !== item.id && sentOperation !== 'claim') claimToken.value = '';
       remember(item);
       requestId.value = item.id;
     }
-    if (operation === 'claim' && typeof response.body.claimToken === 'string') claimToken.value = response.body.claimToken;
-    if (operation !== 'list') await refreshHistory();
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : 'Request failed'; }
+    if (sentOperation === 'claim' && typeof response.body.claimToken === 'string') claimToken.value = response.body.claimToken;
+    if (sentOperation !== 'list') await refreshHistory();
+  } catch (cause) {
+    if (sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value)
+      error.value = cause instanceof Error ? cause.message : 'Request failed';
+  }
   finally { busy.value = false; }
 }
 
@@ -194,25 +222,42 @@ async function previousPage() {
 async function decide(decision: 'approve' | 'reject') {
   if (busy.value || !requestId.value) return;
   error.value = '';
+  const sentMode = mode.value;
+  const sentClient = clientId.value;
+  const sentRequestId = requestId.value;
+  const sentOperation = operation.value;
   try {
     busy.value = true;
-    const response = await api('/api/decide', { requestId: requestId.value, clientId: clientId.value, decision, actor: actor.value }) as { message: string; request: RequestView };
-    record(`${decision.toUpperCase()} · ${actor.value}`, 200, response);
+    const response = await api('/api/decide', { requestId: sentRequestId, clientId: sentClient, decision, actor: actor.value }) as { message: string; request: RequestView };
+    const current = sentMode === mode.value && sentClient === clientId.value && sentRequestId === requestId.value && sentOperation === operation.value;
+    record(`${decision.toUpperCase()} · ${sentClient} · ${sentMode}`, 200, response, current);
+    if (!current) return;
     remember(response.request);
     await refreshHistory();
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : 'Decision failed'; }
+  } catch (cause) {
+    if (sentMode === mode.value && sentClient === clientId.value && sentRequestId === requestId.value && sentOperation === operation.value)
+      error.value = cause instanceof Error ? cause.message : 'Decision failed';
+  }
   finally { busy.value = false; }
 }
 
 async function advanceTime() {
   if (busy.value) return;
   error.value = '';
+  const sentMode = mode.value;
+  const sentClient = clientId.value;
+  const sentOperation = operation.value;
   try {
     busy.value = true;
     const response = await api('/api/advance-time', { seconds: Number(advanceSeconds.value) });
-    record('ADVANCE CLOCK', 200, response);
+    const current = sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value;
+    record(`ADVANCE CLOCK · ${sentClient} · ${sentMode}`, 200, response, current);
+    if (!current) return;
     await refreshHistory();
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : 'Clock change failed'; }
+  } catch (cause) {
+    if (sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value)
+      error.value = cause instanceof Error ? cause.message : 'Clock change failed';
+  }
   finally { busy.value = false; }
 }
 
@@ -256,7 +301,7 @@ onMounted(async () => {
       <aside class="sidebar">
         <div class="sidebar-section">
           <div class="sidebar-heading"><span>REQUESTS</span><span class="count">{{ endpoints.length }}</span></div>
-          <button v-for="item in endpoints" :key="item.operation" class="endpoint-item" :class="{ active: operation === item.operation }" @click="operation = item.operation; requestTab = 'body'">
+          <button v-for="item in endpoints" :key="item.operation" class="endpoint-item" :class="{ active: operation === item.operation }" @click="selectOperation(item.operation)">
             <span class="method" :class="item.method.toLowerCase()">{{ item.method }}</span><span class="endpoint-label">{{ item.label }}</span>
           </button>
         </div>
@@ -361,7 +406,7 @@ onMounted(async () => {
         <section class="response-section">
           <div class="response-heading"><div><p class="kicker">RESPONSE</p><h2>Output</h2></div><div v-if="visibleEntry" class="response-summary"><span class="http-status" :class="visibleEntry.status >= 400 ? 'error' : 'success'">HTTP {{ visibleEntry.status }}</span><span>{{ visibleEntry.time }}</span></div></div>
           <div class="response-tabs" role="tablist" aria-label="Response view"><button role="tab" :aria-selected="responseTab === 'body'" :class="{ active: responseTab === 'body' }" @click="responseTab = 'body'">Body</button><button role="tab" :aria-selected="responseTab === 'history'" :class="{ active: responseTab === 'history' }" @click="responseTab = 'history'">History <span class="history-count">{{ entries.length }}</span></button><span class="tabs-spacer"></span><button v-if="visibleEntry && responseTab === 'body'" class="copy-button" @click="copyResponse">{{ copied ? 'Copied' : 'Copy JSON' }}</button></div>
-          <div v-if="responseTab === 'body'" class="response-body"><div v-if="visibleEntry" class="response-code"><div class="response-code-header"><span>{{ visibleEntry.label }}</span><span>JSON</span></div><pre>{{ JSON.stringify(visibleEntry.body, null, 2) }}</pre></div><div v-else class="response-empty"><span>↳</span><strong>Waiting for a request</strong><p>Choose an endpoint, fill in its values, and click Send. The response will appear here.</p></div></div>
+          <div v-if="responseTab === 'body'" class="response-body"><div v-if="visibleEntry" class="response-code"><div class="response-code-header"><span>{{ visibleEntry.label }}</span><span>JSON</span></div><pre>{{ JSON.stringify(visibleEntry.body, null, 2) }}</pre></div><div v-else class="response-empty"><span>↳</span><strong>Waiting for a request</strong><p>Send the selected request to see its response.<template v-if="entries.length"> Previous responses remain in History.</template></p></div></div>
           <div v-else class="history-body"><div v-if="!entries.length" class="response-empty">No responses in this session yet.</div><button v-for="(entry, index) in entries" :key="index" class="history-item" :class="{ active: activeEntry === index }" @click="activeEntry = index; responseTab = 'body'"><span class="history-status" :class="entry.status >= 400 ? 'error' : 'success'">{{ entry.status }}</span><strong>{{ entry.label }}</strong><time>{{ entry.time }}</time><span>→</span></button></div>
         </section>
       </div>

@@ -14,7 +14,7 @@ npm run playground
 
 Open `http://127.0.0.1:5173`. The default **Simulated Telegram** mode needs no `.env`, bot, network connection, or running gateway. It uses `data/playground.sqlite`, separate from the normal `data/gateway.sqlite` database. The two built-in test clients are `website` and `backups`, each with a separate simulated chat and approver. Stop the playground with Ctrl+C. Its request history and simulated clock offset remain in its database across restarts.
 
-Choose an endpoint from the request list, edit its parameters or body, and click **Send**. The response pane shows the HTTP status and JSON body; its **History** tab keeps the last 20 responses in browser memory. The **JSON preview** tab shows the request body or list query before sending. Claim tokens appear in responses and in the claim-token field, but are not saved to browser storage; keep the playground private while testing. Recent requests are loaded from the authenticated list API for the selected client.
+Choose an endpoint from the request list, edit its parameters or body, and click **Send**. The response pane shows the HTTP status and JSON body; its **History** tab keeps the last 20 responses in browser memory. Selecting another endpoint, client, or mode clears the displayed response while leaving History available. The **JSON preview** tab shows the request body or list query before sending. Claim tokens appear in responses and in the claim-token field, but are not saved to browser storage; keep the playground private while testing. Recent requests are loaded from the authenticated list API for the selected client.
 
 ## Try each feature in simulated mode
 
