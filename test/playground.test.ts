@@ -51,7 +51,11 @@ test('playground guards commands and exercises HTTP auth, ownership and idempote
   const first = (await call(app, session, '/api/execute', command('create', { payload: input() }))).json() as { status: number; body: { id: string } };
   assert.equal(first.status, 201);
   const id = first.body.id;
-  assert.equal((await call(app, session, '/api/history')).json()[0].deliveryStatus, 'delivered');
+  const listed = (await call(app, session, '/api/execute', command('list', { filters: { deliveryStatus: 'delivered' } }))).json();
+  assert.equal(listed.status, 200);
+  assert.deepEqual(listed.body.items.map((item: { id: string }) => item.id), [id]);
+  assert.deepEqual((await call(app, session, '/api/execute', command('list', { clientId: 'backups' }))).json().body.items, []);
+  assert.equal((await call(app, session, '/api/execute', command('list', { auth: 'missing' }))).json().status, 401);
   assert.equal((await call(app, session, '/api/execute', command('create', { payload: input() }))).json().status, 200);
   assert.equal((await call(app, session, '/api/execute', command('create', { payload: { ...input(), title: 'Changed' } }))).json().status, 409);
   assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id, clientId: 'backups' }))).json().status, 404);
@@ -110,7 +114,7 @@ test('live mode keeps client keys in the backend while calling the real HTTP rou
   try {
     const fetcher: typeof fetch = async (url, init) => {
       const response = await gateway.inject({ method: (init?.method ?? 'GET') as 'GET' | 'POST',
-        url: new URL(String(url)).pathname, headers: init?.headers as Record<string, string>,
+        url: new URL(String(url)).pathname + new URL(String(url)).search, headers: init?.headers as Record<string, string>,
         ...(init?.body ? { payload: String(init.body) } : {}) });
       return new Response(response.body, { status: response.statusCode, headers: { 'content-type': 'application/json' } });
     };
@@ -122,6 +126,9 @@ test('live mode keeps client keys in the backend while calling the real HTTP rou
     const created = (await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'create', payload: input('live:test') })).json();
     assert.equal(created.status, 201);
     assert.equal(created.body.clientId, 'website');
+    const listed = (await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'list', filters: { status: 'pending', limit: 1 } })).json();
+    assert.equal(listed.status, 200);
+    assert.deepEqual(listed.body.items.map((item: { id: string }) => item.id), [created.body.id]);
     assert.equal((await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'get', requestId: created.body.id, auth: 'missing' })).json().status, 401);
   } finally { await gateway.close(); db.close(); }
 });

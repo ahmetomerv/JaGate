@@ -6,6 +6,22 @@ import { GatewayError } from './errors.js';
 import { createSchema } from './model.js';
 
 const idSchema = z.string().uuid();
+const listQuerySchema = z.object({
+  status: z.enum(['pending', 'approved', 'rejected', 'expired', 'cancelled']).optional(),
+  deliveryStatus: z.enum(['pending', 'retrying', 'delivered', 'failed']).optional(),
+  executionStatus: z.enum(['unclaimed', 'claimed', 'succeeded', 'failed']).optional(),
+  limit: z.string().regex(/^[1-9][0-9]{0,2}$/).transform(Number).pipe(z.number().max(100)).default('20'),
+  cursor: z.string().max(256).regex(/^[A-Za-z0-9_-]+$/).optional(),
+}).strict();
+const cursorSchema = z.tuple([z.string().datetime(), idSchema]);
+
+function decodeCursor(cursor: string | undefined): { createdAt: string; id: string } | undefined {
+  if (!cursor) return undefined;
+  try {
+    const [createdAt, id] = cursorSchema.parse(JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')));
+    return { createdAt, id };
+  } catch { throw new GatewayError('invalid_input', 400, 'invalid pagination cursor'); }
+}
 const resultSchema = z.object({
   claimToken: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   status: z.enum(['succeeded', 'failed']),
@@ -54,6 +70,17 @@ export function createHttpServer(core: GatewayCore, clientKeys: ReadonlyMap<stri
       if (!core.storageReady() || !telegramReady()) throw new GatewayError('not_ready', 503, 'gateway is not ready to accept requests');
       const { request: created, created: isNew } = core.create(request.clientId, createSchema.parse(request.body));
       return reply.code(isNew ? 201 : 200).send(created);
+    });
+    v1.get('/requests', async (request) => {
+      const { cursor, ...filters } = listQuerySchema.parse(request.query);
+      const before = decodeCursor(cursor);
+      return core.list(request.clientId, {
+        limit: filters.limit,
+        ...(filters.status ? { status: filters.status } : {}),
+        ...(filters.deliveryStatus ? { deliveryStatus: filters.deliveryStatus } : {}),
+        ...(filters.executionStatus ? { executionStatus: filters.executionStatus } : {}),
+        ...(before ? { before } : {}),
+      });
     });
     v1.get('/requests/:id', async (request) => core.get(request.clientId, idSchema.parse((request.params as { id: string }).id)));
     v1.post('/requests/:id/cancel', async (request) => core.cancel(request.clientId, idSchema.parse((request.params as { id: string }).id)));

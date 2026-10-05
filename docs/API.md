@@ -59,6 +59,27 @@ Example response (fields also returned by `GET`, `cancel`, and `result`):
 
 The client ID, action, title, description, details, metadata, creation time, and expiry time never change after creation. `decidedBy` is the numeric Telegram user ID as a string when decided by an approver. Expiry and cancellation have no deciding user.
 
+## List and filter requests
+
+`GET /v1/requests` returns only requests owned by the bearer key's client. Results are ordered by `createdAt` descending, then `id` descending. All filters are optional and combine with AND:
+
+| Query parameter | Values | Default |
+| --- | --- | --- |
+| `status` | `pending`, `approved`, `rejected`, `expired`, `cancelled` | any |
+| `deliveryStatus` | `pending`, `retrying`, `delivered`, `failed` | any |
+| `executionStatus` | `unclaimed`, `claimed`, `succeeded`, `failed` | any |
+| `limit` | integer from 1 to 100 | 20 |
+| `cursor` | opaque `nextCursor` from the previous page | first page |
+
+```sh
+curl -sS 'http://127.0.0.1:3080/v1/requests?status=pending&limit=20' \
+  -H "Authorization: Bearer $JAGATE_CLIENT_KEY"
+```
+
+The response is `{ "items": [/* complete request objects */], "nextCursor": null }`. When `nextCursor` is a string, send it as the `cursor` parameter with the **same filters and limit** to fetch the next page. A null cursor means there are no more matching requests. The cursor marks the last request on the page; newly created requests do not shift later pages. Status can change between page requests, so repeat from the first page when you need a fresh view. An empty result returns `items: []` and `nextCursor: null`. Unknown or invalid query parameters return 400 `invalid_input`.
+
+The TypeScript client exposes `listRequests({ status, deliveryStatus, executionStatus, limit, cursor })` with `ListRequestsQuery` and `ListRequestsPage` types.
+
 ## Read, cancel, claim, and report
 
 | Route | Body | Success | Common errors |

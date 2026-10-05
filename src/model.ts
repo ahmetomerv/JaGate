@@ -51,6 +51,15 @@ export type RequestView = {
   deliveryError: string | null;
 };
 
+export type ListRequestsQuery = {
+  status?: DecisionStatus;
+  deliveryStatus?: DeliveryStatus;
+  executionStatus?: ExecutionStatus;
+  limit?: number;
+  cursor?: string;
+};
+export type ListRequestsPage = { items: RequestView[]; nextCursor: string | null };
+
 function stable(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stable);
   if (value && typeof value === 'object') {

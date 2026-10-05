@@ -38,7 +38,8 @@ const routes = () => new Map([['primary', { chatId: '-100', approverIds: new Set
 
 function mockFetch(app: ReturnType<typeof createHttpServer>): typeof fetch {
   return async (url, init) => {
-    const path = new URL(String(url)).pathname;
+    const parsed = new URL(String(url));
+    const path = parsed.pathname + parsed.search;
     const response = await app.inject({ method: (init?.method ?? 'GET') as 'GET' | 'POST', url: path,
       headers: init?.headers as Record<string, string>, ...(init?.body ? { payload: String(init.body) } : {}) });
     return new Response(response.body, { status: response.statusCode, headers: { 'content-type': 'application/json' } });
@@ -110,7 +111,7 @@ test('migration and canonical idempotency survive restart without changing appro
   db.close();
   const reopened = openDatabase(path); dbs.push(reopened);
   const restarted = new GatewayCore(reopened, clock);
-  assert.equal((reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 2);
+  assert.equal((reopened.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get() as { count: number }).count, 3);
   const reordered = { ...original, metadata: { options: { a: 1, b: 2 }, ticket: 'OPS-1' } };
   assert.equal(restarted.create('primary', reordered).request.id, created.id);
   assert.throws(() => restarted.create('primary', { ...original, details: [{ label: 'Target', value: 'production' }] }), { code: 'idempotency_conflict' });
@@ -157,7 +158,7 @@ test('all v1 routes require a valid key while health stays public', async () => 
   const id = core.create('primary', input()).request.id;
   const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
   const routes: Array<['GET' | 'POST', string]> = [
-    ['POST', '/v1/requests'], ['GET', `/v1/requests/${id}`],
+    ['POST', '/v1/requests'], ['GET', '/v1/requests'], ['GET', `/v1/requests/${id}`],
     ['POST', `/v1/requests/${id}/cancel`], ['POST', `/v1/requests/${id}/claim`],
     ['POST', `/v1/requests/${id}/result`],
   ];
@@ -170,6 +171,39 @@ test('all v1 routes require a valid key while health stays public', async () => 
   }
   assert.deepEqual((await app.inject({ method: 'GET', url: '/health' })).json(), { status: 'ok' });
   assert.equal((await app.inject({ method: 'GET', url: '/ready' })).statusCode, 200);
+  await app.close();
+});
+
+test('listing is owner scoped, filtered, ordered, paginated, and reflects expiry', async () => {
+  const { core, advance } = setup();
+  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)], ['secondary', 'b'.repeat(32)]]), () => true);
+  const primary = { authorization: `Bearer ${'a'.repeat(32)}` };
+  const secondary = { authorization: `Bearer ${'b'.repeat(32)}` };
+  const first = core.create('primary', input('list:first')).request;
+  advance(1);
+  const second = core.create('primary', input('list:second')).request;
+  const other = core.create('secondary', input('list:other')).request;
+  core.cancel('primary', second.id);
+  const read = async (url: string, headers = primary) => app.inject({ method: 'GET', url, headers });
+
+  const page = (await read('/v1/requests?limit=1')).json();
+  assert.deepEqual(page.items.map((item: { id: string }) => item.id), [second.id]);
+  assert.equal(typeof page.nextCursor, 'string');
+  const next = (await read(`/v1/requests?limit=1&cursor=${encodeURIComponent(page.nextCursor)}`)).json();
+  assert.deepEqual(next.items.map((item: { id: string }) => item.id), [first.id]);
+  assert.equal(next.nextCursor, null);
+  assert.deepEqual((await read('/v1/requests?status=cancelled')).json().items.map((item: { id: string }) => item.id), [second.id]);
+  assert.deepEqual((await read('/v1/requests?deliveryStatus=pending&executionStatus=unclaimed')).json().items.map((item: { id: string }) => item.id), [second.id, first.id]);
+  assert.deepEqual((await read('/v1/requests', secondary)).json().items.map((item: { id: string }) => item.id), [other.id]);
+
+  advance(900_000);
+  assert.deepEqual((await read('/v1/requests?status=expired')).json().items.map((item: { id: string }) => item.id), [first.id]);
+  assert.equal((await read('/v1/requests?status=pending')).json().items.length, 0);
+  for (const query of ['limit=0', 'limit=101', 'limit=1.5', 'status=unknown', 'deliveryStatus=unknown', 'executionStatus=unknown', 'cursor=broken', 'extra=value']) {
+    const response = await read(`/v1/requests?${query}`);
+    assert.equal(response.statusCode, 400, query);
+    assert.equal(response.json().error.code, 'invalid_input', query);
+  }
   await app.close();
 });
 
@@ -381,6 +415,7 @@ test('client methods complete a failed execution and preserve API errors', async
   const client = new ApprovalClient({ baseUrl: 'http://local', apiKey: 'a'.repeat(32), fetch: mockFetch(app), pollIntervalMs: 10 });
   const request = await client.createRequest({ idempotencyKey: 'sdk:one', action: 'maintenance', title: 'Run maintenance',
     description: 'Compact local records', expiresInSeconds: 60 });
+  assert.deepEqual((await client.listRequests({ status: 'pending', limit: 1 })).items.map((item) => item.id), [request.id]);
   assert.deepEqual(request.details, []);
   assert.deepEqual(request.metadata, {});
   assert.equal((await client.getRequest(request.id)).status, 'pending');

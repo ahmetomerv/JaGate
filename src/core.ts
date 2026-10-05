@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Db } from './storage.js';
 import { GatewayError } from './errors.js';
-import { canonicalContent, hash, type CreateInput, type DecisionStatus, type RequestView } from './model.js';
+import { canonicalContent, hash, type CreateInput, type DecisionStatus, type ListRequestsPage, type ListRequestsQuery, type RequestView } from './model.js';
 
 type Row = {
   id: string; client_id: string; idempotency_key: string; fingerprint: string; action: string; title: string;
@@ -72,6 +72,28 @@ export class GatewayCore {
     const row = this.db.prepare('SELECT * FROM requests WHERE id = ? AND client_id = ?').get(id, clientId) as Row | undefined;
     if (!row) throw new GatewayError('not_found', 404, 'request not found');
     return this.view(row);
+  }
+
+  list(clientId: string, options: Omit<ListRequestsQuery, 'cursor'> & { before?: { createdAt: string; id: string } }): ListRequestsPage {
+    this.expire();
+    const conditions = ['client_id = ?'];
+    const values: Array<string | number> = [clientId];
+    if (options.status) { conditions.push('decision_status = ?'); values.push(options.status); }
+    if (options.deliveryStatus) { conditions.push('delivery_status = ?'); values.push(options.deliveryStatus); }
+    if (options.executionStatus) { conditions.push('execution_status = ?'); values.push(options.executionStatus); }
+    if (options.before) {
+      conditions.push('(created_at < ? OR (created_at = ? AND id < ?))');
+      values.push(options.before.createdAt, options.before.createdAt, options.before.id);
+    }
+    const limit = options.limit ?? 20;
+    const rows = this.db.prepare(`SELECT * FROM requests WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ?`)
+      .all(...values, limit + 1) as Row[];
+    const items = rows.slice(0, limit);
+    const last = items.at(-1);
+    return {
+      items: items.map((row) => this.view(row)),
+      nextCursor: rows.length > limit && last ? Buffer.from(JSON.stringify([last.created_at, last.id])).toString('base64url') : null,
+    };
   }
 
   cancel(clientId: string, id: string): RequestView {

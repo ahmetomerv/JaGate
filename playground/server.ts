@@ -15,9 +15,16 @@ const modeSchema = z.enum(['simulated', 'live']);
 const commandSchema = z.object({
   mode: modeSchema,
   clientId: z.string().min(1).max(32),
-  operation: z.enum(['create', 'get', 'cancel', 'claim', 'result', 'health', 'ready']),
+  operation: z.enum(['create', 'list', 'get', 'cancel', 'claim', 'result', 'health', 'ready']),
   auth: z.enum(['valid', 'missing', 'invalid']).default('valid'),
   requestId: z.string().max(128).optional(),
+  filters: z.object({
+    status: z.string().max(32).optional(),
+    deliveryStatus: z.string().max(32).optional(),
+    executionStatus: z.string().max(32).optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+    cursor: z.string().max(256).optional(),
+  }).strict().optional(),
   payload: z.unknown().optional(),
 }).strict();
 
@@ -79,36 +86,33 @@ export function createPlayground(options: PlaygroundOptions) {
     gatewayUrl: liveUrl,
   }));
 
-  app.get('/api/history', async () => {
-    core.expire();
-    const rows = db.prepare('SELECT id, client_id FROM requests ORDER BY created_at DESC LIMIT 100').all() as Array<{ id: string; client_id: string }>;
-    return rows.map((row) => core.get(row.client_id, row.id));
-  });
-
   app.post('/api/execute', async (request, reply) => {
     const parsed = commandSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid playground command' });
-    const { mode, clientId, operation, auth, requestId, payload } = parsed.data;
+    const { mode, clientId, operation, auth, requestId, filters, payload } = parsed.data;
     if (mode === 'simulated' ? !clientSchema.safeParse(clientId).success : !liveKeys?.has(clientId))
       return reply.code(400).send({ error: 'Unknown client for this mode' });
     if (['get', 'cancel', 'claim', 'result'].includes(operation) && !requestId)
       return reply.code(400).send({ error: 'Select or enter a request ID' });
     const path = operation === 'health' || operation === 'ready' ? `/${operation}`
-      : operation === 'create' ? '/v1/requests'
+      : operation === 'create' || operation === 'list' ? '/v1/requests'
         : `/v1/requests/${encodeURIComponent(requestId!)}` + (operation === 'get' ? '' : `/${operation}`);
-    const method = operation === 'get' || operation === 'health' || operation === 'ready' ? 'GET' : 'POST';
+    const query = new URLSearchParams();
+    if (operation === 'list' && filters) for (const [key, value] of Object.entries(filters)) if (value !== undefined && value !== '') query.set(key, String(value));
+    const url = `${path}${query.size ? `?${query}` : ''}`;
+    const method = ['list', 'get', 'health', 'ready'].includes(operation) ? 'GET' : 'POST';
     const key = mode === 'simulated' ? simulatedKeys.get(clientId as ClientId)! : liveKeys!.get(clientId)!;
     const authorization = auth === 'missing' ? undefined : `Bearer ${auth === 'invalid' ? 'invalid-playground-key' : key}`;
     const headers = { ...(authorization ? { authorization } : {}), ...(method === 'POST' ? { 'content-type': 'application/json' } : {}) };
     const body = operation === 'create' || operation === 'result' ? payload : {};
 
     if (mode === 'simulated') {
-      const result = await simulatedApi.inject({ method, url: path, headers, ...(method === 'POST' ? { payload: JSON.stringify(body ?? {}) } : {}) });
+      const result = await simulatedApi.inject({ method, url, headers, ...(method === 'POST' ? { payload: JSON.stringify(body ?? {}) } : {}) });
       if (operation === 'create' && result.statusCode === 201) await telegram.deliverDue();
       return { status: result.statusCode, body: result.json() as unknown };
     }
     try {
-      const response = await fetcher(new URL(path, liveUrl), {
+      const response = await fetcher(new URL(url, liveUrl), {
         method, headers, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}), signal: AbortSignal.timeout(10_000),
       });
       return { status: response.status, body: await response.json() as unknown };

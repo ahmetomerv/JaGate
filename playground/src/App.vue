@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 
 type Mode = 'simulated' | 'live';
-type Operation = 'create' | 'get' | 'cancel' | 'claim' | 'result' | 'health' | 'ready';
+type Operation = 'create' | 'list' | 'get' | 'cancel' | 'claim' | 'result' | 'health' | 'ready';
 type RequestView = {
   id: string; clientId: string; title: string; action: string; status: string; executionStatus: string;
-  deliveryStatus: string; deliveryAttempts: number; expiresAt: string; resultSummary: string | null;
+  deliveryStatus: string; deliveryAttempts: number; createdAt: string; expiresAt: string; resultSummary: string | null;
 };
+type ListPage = { items: RequestView[]; nextCursor: string | null };
 type Entry = { time: string; label: string; status: number; body: unknown };
 type Bootstrap = { token: string; simulatedClients: string[]; liveClients: string[]; gatewayUrl: string };
 
@@ -16,6 +17,13 @@ const clientId = ref('website');
 const auth = ref<'valid' | 'missing' | 'invalid'>('valid');
 const requestId = ref('');
 const history = ref<RequestView[]>([]);
+const listPage = ref<ListPage | null>(null);
+const listStatus = ref('');
+const listDeliveryStatus = ref('');
+const listExecutionStatus = ref('');
+const listLimit = ref(20);
+const listCursor = ref('');
+const listCursorStack = ref<string[]>([]);
 const entries = ref<Entry[]>([]);
 const busy = ref(false);
 const error = ref('');
@@ -40,6 +48,7 @@ const copied = ref(false);
 
 const endpoints: Array<{ operation: Operation; method: 'GET' | 'POST'; label: string; path: string }> = [
   { operation: 'create', method: 'POST', label: 'Create request', path: '/v1/requests' },
+  { operation: 'list', method: 'GET', label: 'List requests', path: '/v1/requests' },
   { operation: 'get', method: 'GET', label: 'Get request', path: '/v1/requests/:id' },
   { operation: 'cancel', method: 'POST', label: 'Cancel request', path: '/v1/requests/:id/cancel' },
   { operation: 'claim', method: 'POST', label: 'Claim approval', path: '/v1/requests/:id/claim' },
@@ -49,18 +58,35 @@ const endpoints: Array<{ operation: Operation; method: 'GET' | 'POST'; label: st
 ];
 
 const clients = computed(() => mode.value === 'simulated' ? bootstrap.value?.simulatedClients ?? [] : bootstrap.value?.liveClients ?? []);
-const selected = computed(() => history.value.find((item) => item.id === requestId.value));
+const selected = computed(() => [...history.value, ...(listPage.value?.items ?? [])].find((item) => item.id === requestId.value));
 const latest = computed(() => entries.value[0]);
 const visibleEntry = computed(() => entries.value[activeEntry.value] ?? latest.value);
 const endpoint = computed(() => endpoints.find((item) => item.operation === operation.value)!);
-const requestPath = computed(() => endpoint.value.path.replace(':id', requestId.value || ':id'));
-const needsRequestId = computed(() => !['create', 'health', 'ready'].includes(operation.value));
+const listFilters = computed(() => ({
+  ...(listStatus.value ? { status: listStatus.value } : {}),
+  ...(listDeliveryStatus.value ? { deliveryStatus: listDeliveryStatus.value } : {}),
+  ...(listExecutionStatus.value ? { executionStatus: listExecutionStatus.value } : {}),
+  limit: Number(listLimit.value),
+  ...(listCursor.value ? { cursor: listCursor.value } : {}),
+}));
+const requestPath = computed(() => {
+  const path = endpoint.value.path.replace(':id', requestId.value || ':id');
+  return operation.value === 'list' ? `${path}?${new URLSearchParams(Object.entries(listFilters.value).map(([key, value]) => [key, String(value)])).toString()}` : path;
+});
+const needsRequestId = computed(() => !['create', 'list', 'health', 'ready'].includes(operation.value));
 const previewBody = computed(() => operation.value === 'create' ? {
   idempotencyKey: key.value, action: action.value, title: title.value, description: description.value,
   details: parsePreview(detailsText.value), metadata: parsePreview(metadataText.value), expiresInSeconds: Number(expiresInSeconds.value),
 } : operation.value === 'result' ? {
   claimToken: claimToken.value, status: resultStatus.value, summary: resultSummary.value,
-} : {});
+} : operation.value === 'list' ? listFilters.value : {});
+
+watch([listStatus, listDeliveryStatus, listExecutionStatus, listLimit, clientId, mode], () => {
+  listCursor.value = '';
+  listCursorStack.value = [];
+  listPage.value = null;
+});
+watch([clientId, mode], () => { history.value = []; void refreshHistory(); });
 
 function parsePreview(value: string) {
   try { return JSON.parse(value) as unknown; } catch { return value; }
@@ -75,9 +101,6 @@ function selectRequest(item: RequestView) {
 
 function remember(item: RequestView) {
   history.value = [item, ...history.value.filter((existing) => existing.id !== item.id)].slice(0, 100);
-  if (mode.value === 'live') {
-    localStorage.setItem('jagate-playground-live-history', JSON.stringify(history.value));
-  }
 }
 
 async function api(path: string, body?: unknown) {
@@ -105,12 +128,13 @@ async function copyResponse() {
 }
 
 async function refreshHistory() {
-  if (!bootstrap.value) return;
-  if (mode.value === 'simulated') history.value = await api('/api/history') as RequestView[];
-  else {
-    try { history.value = JSON.parse(localStorage.getItem('jagate-playground-live-history') ?? '[]') as RequestView[]; }
-    catch { history.value = []; }
-  }
+  if (!bootstrap.value || !clientId.value) { history.value = []; return; }
+  const currentMode = mode.value;
+  const currentClient = clientId.value;
+  try {
+    const response = await api('/api/execute', { mode: currentMode, clientId: currentClient, operation: 'list', auth: 'valid', filters: { limit: 20 } }) as { status: number; body: ListPage };
+    if (currentMode === mode.value && currentClient === clientId.value) history.value = response.status === 200 ? response.body.items : [];
+  } catch { if (currentMode === mode.value && currentClient === clientId.value) history.value = []; }
 }
 
 function changeMode(next: Mode) {
@@ -119,12 +143,13 @@ function changeMode(next: Mode) {
   requestId.value = '';
   claimToken.value = '';
   error.value = '';
-  void refreshHistory();
 }
 
 async function execute(operation: Operation) {
   if (!bootstrap.value || busy.value) return;
   error.value = '';
+  const sentMode = mode.value;
+  const sentClient = clientId.value;
   let payload: unknown;
   try {
     if (operation === 'create') payload = {
@@ -134,9 +159,12 @@ async function execute(operation: Operation) {
     if (operation === 'result') payload = { claimToken: claimToken.value, status: resultStatus.value, summary: resultSummary.value };
     busy.value = true;
     const response = await api('/api/execute', {
-      mode: mode.value, clientId: clientId.value, operation, auth: auth.value, requestId: requestId.value, payload,
+      mode: sentMode, clientId: sentClient, operation, auth: auth.value, requestId: requestId.value,
+      ...(operation === 'list' ? { filters: listFilters.value } : {}), payload,
     }) as { status: number; body: Record<string, unknown> };
+    if (sentMode !== mode.value || sentClient !== clientId.value) return;
     record(`${operation.toUpperCase()} · ${clientId.value}`, response.status, response.body);
+    if (operation === 'list') listPage.value = response.status === 200 ? response.body as unknown as ListPage : null;
     const view = operation === 'claim' ? response.body.request : response.body;
     if (view && typeof view === 'object' && 'id' in view) {
       const item = view as RequestView;
@@ -145,9 +173,22 @@ async function execute(operation: Operation) {
       requestId.value = item.id;
     }
     if (operation === 'claim' && typeof response.body.claimToken === 'string') claimToken.value = response.body.claimToken;
-    if (mode.value === 'simulated') await refreshHistory();
+    if (operation !== 'list') await refreshHistory();
   } catch (cause) { error.value = cause instanceof Error ? cause.message : 'Request failed'; }
   finally { busy.value = false; }
+}
+
+async function nextPage() {
+  if (!listPage.value?.nextCursor || busy.value) return;
+  listCursorStack.value.push(listCursor.value);
+  listCursor.value = listPage.value.nextCursor;
+  await execute('list');
+}
+
+async function previousPage() {
+  if (!listCursorStack.value.length || busy.value) return;
+  listCursor.value = listCursorStack.value.pop()!;
+  await execute('list');
 }
 
 async function decide(decision: 'approve' | 'reject') {
@@ -220,7 +261,7 @@ onMounted(async () => {
           </button>
         </div>
         <div class="sidebar-section recent-section">
-          <div class="sidebar-heading"><span>RECENT REQUESTS</span><button class="icon-button" title="Refresh recent requests" aria-label="Refresh recent requests" @click="refreshHistory">↻</button></div>
+          <div class="sidebar-heading"><span>RECENT · {{ clientId }}</span><button class="icon-button" title="Refresh recent requests" aria-label="Refresh recent requests" @click="refreshHistory">↻</button></div>
           <p v-if="!history.length" class="sidebar-empty">Create a request to see it here.</p>
           <button v-for="item in history" :key="item.id" class="recent-item" :class="{ active: requestId === item.id }" :aria-pressed="requestId === item.id" @click="selectRequest(item)">
             <span class="recent-title">{{ item.title }}</span>
@@ -240,16 +281,16 @@ onMounted(async () => {
             <button class="send-button" :disabled="busy || !clientId || (needsRequestId && !requestId)" @click="execute(operation)">{{ busy ? 'Sending…' : 'Send' }} <span>➜</span></button>
           </div>
           <div class="request-tabs" role="tablist" aria-label="Request editor">
-            <button role="tab" :aria-selected="requestTab === 'body'" :class="{ active: requestTab === 'body' }" @click="requestTab = 'body'">{{ needsRequestId ? 'Params & body' : operation === 'create' ? 'Body' : 'Overview' }}</button>
+            <button role="tab" :aria-selected="requestTab === 'body'" :class="{ active: requestTab === 'body' }" @click="requestTab = 'body'">{{ needsRequestId ? 'Params & body' : operation === 'create' ? 'Body' : operation === 'list' ? 'Filters' : 'Overview' }}</button>
             <button role="tab" :aria-selected="requestTab === 'preview'" :class="{ active: requestTab === 'preview' }" @click="requestTab = 'preview'">JSON preview</button>
             <span class="tabs-spacer"></span><span class="auth-summary">Authorization <strong>{{ auth === 'valid' ? 'Bearer key' : auth === 'missing' ? 'None' : 'Invalid key' }}</strong></span>
           </div>
 
           <div v-if="requestTab === 'preview'" class="editor-body preview-body">
-            <div class="editor-caption"><span>REQUEST BODY</span><span>Read only preview</span></div>
+            <div class="editor-caption"><span>{{ operation === 'list' ? 'QUERY PARAMETERS' : 'REQUEST BODY' }}</span><span>Read only preview</span></div>
             <pre>{{ JSON.stringify(previewBody, null, 2) }}</pre>
             <p v-if="operation === 'create' || operation === 'result'" class="help-text">Edit values in the {{ needsRequestId ? 'Params & body' : 'Body' }} tab.</p>
-            <p v-else class="help-text">This endpoint does not require a request body.</p>
+            <p v-else-if="operation !== 'list'" class="help-text">This endpoint does not require a request body.</p>
           </div>
 
           <div v-else class="editor-body">
@@ -265,6 +306,16 @@ onMounted(async () => {
                 <label class="span-2">Details <span class="label-type">JSON array</span><textarea v-model="detailsText" rows="2" spellcheck="false" class="code-input" /></label>
                 <label class="span-2">Metadata <span class="label-type">JSON object</span><textarea v-model="metadataText" rows="2" spellcheck="false" class="code-input" /></label>
               </div>
+            </template>
+            <template v-else-if="operation === 'list'">
+              <div class="editor-caption"><span>QUERY PARAMETERS</span><span>Only the selected client's requests</span></div>
+              <div class="form-grid list-filter-grid">
+                <label>Decision status<select v-model="listStatus"><option value="">Any</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="expired">Expired</option><option value="cancelled">Cancelled</option></select></label>
+                <label>Delivery status<select v-model="listDeliveryStatus"><option value="">Any</option><option value="pending">Pending</option><option value="retrying">Retrying</option><option value="delivered">Delivered</option><option value="failed">Failed</option></select></label>
+                <label>Execution status<select v-model="listExecutionStatus"><option value="">Any</option><option value="unclaimed">Unclaimed</option><option value="claimed">Claimed</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option></select></label>
+                <label>Page size<input v-model.number="listLimit" type="number" min="1" max="100" /></label>
+              </div>
+              <p class="help-text">Newest first. Send to load a page, then use Next page when more requests exist.</p>
             </template>
             <template v-else-if="needsRequestId">
               <div class="editor-caption"><span>PATH PARAMETERS</span><span>Required</span></div>
@@ -289,6 +340,16 @@ onMounted(async () => {
               <div class="overview-state"><span class="overview-icon">↗</span><div><strong>{{ operation === 'health' ? 'Gateway health' : 'Gateway readiness' }}</strong><p>This public endpoint does not require authorization or a request body. Click Send to inspect its response.</p></div></div>
             </template>
           </div>
+        </section>
+
+        <section v-if="operation === 'list' && listPage" class="list-results" aria-label="Listed requests">
+          <div class="list-results-heading"><strong>Requests in this page</strong><span>{{ listPage.items.length }} shown</span></div>
+          <p v-if="!listPage.items.length" class="list-empty">No requests match these filters.</p>
+          <button v-for="item in listPage.items" :key="item.id" class="list-result" @click="selectRequest(item)">
+            <span><strong>{{ item.title }}</strong><small>{{ item.id }} · {{ new Date(item.createdAt).toLocaleString() }}</small></span>
+            <span class="list-result-status">{{ item.status }} <span aria-hidden="true">→</span></span>
+          </button>
+          <div class="list-pagination"><span>Page {{ listCursorStack.length + 1 }}</span><div class="list-pagination-actions"><button class="utility-button" :disabled="busy || !listCursorStack.length" @click="previousPage">← Previous</button><button class="utility-button" :disabled="busy || !listPage.nextCursor" @click="nextPage">Next →</button></div></div>
         </section>
 
         <section v-if="mode === 'simulated'" class="simulation-strip">

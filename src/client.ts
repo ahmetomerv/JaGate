@@ -1,6 +1,6 @@
-import type { CreateRequestInput, RequestView } from './model.js';
+import type { CreateRequestInput, ListRequestsPage, ListRequestsQuery, RequestView } from './model.js';
 
-export type { CreateRequestInput, RequestView } from './model.js';
+export type { CreateRequestInput, ListRequestsPage, ListRequestsQuery, RequestView } from './model.js';
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) { super(message); }
 }
@@ -19,6 +19,16 @@ export class ApprovalClient {
     return data;
   }
   createRequest(input: CreateRequestInput, signal?: AbortSignal): Promise<RequestView> { return this.call('/v1/requests', 'POST', input, signal); }
+  listRequests(query: ListRequestsQuery = {}, signal?: AbortSignal): Promise<ListRequestsPage> {
+    const params = new URLSearchParams();
+    if (query.status) params.set('status', query.status);
+    if (query.deliveryStatus) params.set('deliveryStatus', query.deliveryStatus);
+    if (query.executionStatus) params.set('executionStatus', query.executionStatus);
+    if (query.limit !== undefined) params.set('limit', String(query.limit));
+    if (query.cursor) params.set('cursor', query.cursor);
+    const search = params.toString();
+    return this.call(`/v1/requests${search ? `?${search}` : ''}`, 'GET', undefined, signal);
+  }
   getRequest(id: string, signal?: AbortSignal): Promise<RequestView> { return this.call(`/v1/requests/${encodeURIComponent(id)}`, 'GET', undefined, signal); }
   cancel(id: string, signal?: AbortSignal): Promise<RequestView> { return this.call(`/v1/requests/${encodeURIComponent(id)}/cancel`, 'POST', {}, signal); }
   claim(id: string, signal?: AbortSignal): Promise<{ claimId: string; claimToken: string; request: RequestView }> { return this.call(`/v1/requests/${encodeURIComponent(id)}/claim`, 'POST', {}, signal); }
