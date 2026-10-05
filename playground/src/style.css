@@ -123,6 +123,7 @@ h2 { font-size: 18px; }
 .simulation-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .simulation-controls select,.simulation-controls input,.utility-button { border: 1px solid #d6e1ed; border-radius: 4px; background: #fff; color: #4a637d; height: 31px; font-size: 11px; padding: 0 9px; }
 .simulation-controls select { min-width: 145px; }
+.inline-field select,.form-grid select,.simulation-controls select { appearance: none; padding-right: 32px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%238899a7' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m2.5 4.5 3.5 3 3.5-3'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; background-size: 12px; }
 .simulation-controls input { width: 58px; }
 .utility-button { font-weight: 600; white-space: nowrap; }
 .utility-button:hover:not(:disabled) { border-color: #83abdf; color: #205ca7; }
