@@ -129,6 +129,9 @@ const requestPath = computed(() => {
 });
 const needsRequestId = computed(() => ['get', 'events', 'cancel', 'claim', 'result'].includes(operation.value));
 const needsKeyId = computed(() => operation.value === 'keyRevoke');
+const requestTabLabel = computed(() => needsRequestId.value || needsKeyId.value ? 'Params & body' : ['create', 'keyCreate'].includes(operation.value) ? 'Body' : ['list', 'keyList', 'audit'].includes(operation.value) ? 'Filters' : 'Overview');
+const authSummary = computed(() => auth.value === 'valid' ? 'Bootstrap key' : auth.value === 'scoped' ? 'Issued key' : auth.value === 'missing' ? 'None' : 'Invalid key');
+const clientOptions = computed(() => clients.value.map((id) => ({ value: id, label: mode.value === 'simulated' ? bootstrap.value?.simulatedExamples[id]?.label ?? id : id })));
 const previewBody = computed(() => operation.value === 'create' ? {
   idempotencyKey: key.value, action: action.value, title: title.value, description: description.value,
   details: parsePreview(detailsText.value), metadata: parsePreview(metadataText.value), expiresInSeconds: Number(expiresInSeconds.value),
@@ -283,6 +286,11 @@ function changeMode(next: Mode) {
   scopedKey.value = '';
   error.value = '';
 }
+
+const modeSelection = computed({
+  get: () => mode.value,
+  set: (next: Mode) => changeMode(next),
+});
 
 async function execute(sentOperation: Operation) {
   if (!bootstrap.value || busy.value) return;
@@ -454,6 +462,26 @@ async function advanceTime() {
   finally { busy.value = false; }
 }
 
+function onScopeChange(scope: ClientKeyScope, event: Event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  keyScopes.value = target.checked
+    ? [...new Set([...keyScopes.value, scope])]
+    : keyScopes.value.filter((item) => item !== scope);
+}
+function statusClass(status: string) {
+  if (status === 'approved' || status === 'succeeded') return 'ok';
+  if (status === 'rejected' || status === 'failed' || status === 'cancelled') return 'bad';
+  if (status === 'pending') return 'wait';
+  return 'idle';
+}
+function keyState(item: ClientKeyView) {
+  if (item.revokedAt) return 'Revoked';
+  const now = Date.now() + (mode.value === 'simulated' ? simulatedClockOffset.value : 0);
+  if (item.expiresAt && Date.parse(item.expiresAt) <= now) return 'Expired';
+  return 'Active';
+}
+
 onMounted(async () => {
   try {
     const response = await fetch('/api/bootstrap');
@@ -468,224 +496,345 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="app-shell">
-    <header class="app-header">
-      <div class="brand"><img class="brand-mark" src="/logo.svg" alt="" width="28" height="28" /><span>JaGate <span class="brand-divider">/</span> Playground</span><span class="dev-badge">LOCAL</span></div>
-      <div class="header-right"><span class="header-caption">Approval API workbench</span><a href="https://github.com/ahmetomerv/JaGate/blob/main/docs/guide/playground.md" target="_blank" rel="noreferrer">Usage guide ↗</a></div>
-    </header>
-
-    <div class="environment-bar">
-      <div class="environment-left">
-        <span class="environment-label">ENVIRONMENT</span>
-        <div class="mode-switch" aria-label="Playground mode">
-          <button :class="{ active: mode === 'simulated' }" :aria-pressed="mode === 'simulated'" @click="changeMode('simulated')">Simulated Telegram</button>
-          <button :class="{ active: mode === 'live' }" :aria-pressed="mode === 'live'" @click="changeMode('live')">Real gateway</button>
-        </div>
-        <span class="environment-address">{{ mode === 'simulated' ? 'Local simulator · isolated database' : bootstrap?.gatewayUrl }}</span>
+  <div class="shell">
+    <header class="chrome">
+    <div class="topbar">
+      <div class="brand">
+        <img src="/logo.svg" alt="" width="28" height="28" />
+        JaGate <span>/</span> Playground
+        <span class="local-tag">LOCAL</span>
       </div>
-      <div class="environment-right">
-        <label class="inline-field">Client <select v-model="clientId" :disabled="!clients.length"><option v-for="id in clients" :key="id" :value="id">{{ mode === 'simulated' ? bootstrap?.simulatedExamples[id]?.label ?? id : id }}</option></select></label>
-        <label class="inline-field">Auth <select v-model="auth"><option value="valid">Bootstrap key</option><option value="scoped">Issued key</option><option value="missing">Missing key</option><option value="invalid">Invalid key</option></select></label>
-        <label v-if="auth === 'scoped'" class="inline-field issued-key-field">Issued key <input v-model="scopedKey" :type="showScopedKey ? 'text' : 'password'" autocomplete="off" spellcheck="false" placeholder="Paste the key returned once" /><button class="subtle-button" @click="showScopedKey = !showScopedKey">{{ showScopedKey ? 'Hide' : 'Show' }}</button></label>
+      <div class="top-links">
+        <span class="hide-narrow">Approval API workbench</span>
+        <a href="https://github.com/ahmetomerv/JaGate/blob/main/docs/guide/playground.md" target="_blank" rel="noreferrer">Usage guide</a>
       </div>
     </div>
-    <div v-if="simulatedExample" class="client-context"><strong>{{ simulatedExample.label }}</strong> (<code>{{ clientId }}</code>) is a client: an application or automation that asks JaGate for approval before it can {{ simulatedExample.scenario }}. Each client has its own requests, keys, Telegram chat, and approver. Selecting another client loads its sample request.</div>
 
-    <div v-if="error" class="global-notice" role="alert">{{ error }}</div>
-    <div v-if="mode === 'live' && !clients.length" class="global-notice">Live mode needs CLIENT_KEYS in your local .env and a running gateway.</div>
+    <div class="environment">
+      <div class="environment-group">
+        <label class="environment-field">
+          <span class="field-label">Environment <span class="mode-note">{{ mode === 'simulated' ? 'Local simulator · isolated database' : bootstrap?.gatewayUrl }}</span></span>
+          <select v-model="modeSelection" aria-label="Environment">
+            <option value="simulated">Simulated Telegram</option>
+            <option value="live">Real gateway</option>
+          </select>
+        </label>
+      </div>
+      <div class="environment-group">
+        <label>Client
+          <select v-model="clientId" :disabled="!clients.length" aria-label="Client">
+            <option v-for="option in clientOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+        <label>Auth
+          <select v-model="auth" aria-label="Authorization">
+            <option value="valid">Bootstrap key</option>
+            <option value="scoped">Issued key</option>
+            <option value="missing">Missing key</option>
+            <option value="invalid">Invalid key</option>
+          </select>
+        </label>
+        <div v-if="auth === 'scoped'" class="inline-field">
+          <label for="issued-key">Issued key</label>
+          <input id="issued-key" v-model="scopedKey" :type="showScopedKey ? 'text' : 'password'" autocomplete="off" spellcheck="false" placeholder="Paste the key returned once" />
+          <button type="button" class="outline" :aria-label="showScopedKey ? 'Hide issued key' : 'Show issued key'" @click="showScopedKey = !showScopedKey">{{ showScopedKey ? 'Hide' : 'Show' }}</button>
+        </div>
+      </div>
+    </div>
+    <p v-if="error" class="notice" role="alert">{{ error }}</p>
+    <p v-if="mode === 'live' && !clients.length" class="notice warn">Live mode needs CLIENT_KEYS in your local .env and a running gateway.</p>
+    </header>
 
-    <main class="workspace">
+    <div class="workbench">
       <aside class="sidebar">
-        <div class="sidebar-section">
-          <div class="sidebar-heading"><span>REQUESTS</span><span class="count">{{ requestEndpoints.length }}</span></div>
-          <button v-for="item in requestEndpoints" :key="item.operation" class="endpoint-item" :class="{ active: operation === item.operation }" @click="selectOperation(item.operation)">
-            <span class="method" :class="item.method.toLowerCase()">{{ item.method }}</span><span class="endpoint-label">{{ item.label }}</span>
-          </button>
-        </div>
-        <div class="sidebar-section key-section">
-          <div class="sidebar-heading"><span>CLIENT KEYS</span><span class="count">{{ keyEndpoints.length }}</span></div>
-          <button v-for="item in keyEndpoints" :key="item.operation" class="endpoint-item" :class="{ active: operation === item.operation }" @click="selectOperation(item.operation)">
-            <span class="method" :class="item.method.toLowerCase()">{{ item.method }}</span><span class="endpoint-label">{{ item.label }}</span>
-          </button>
-        </div>
-        <div class="sidebar-section utility-section">
-          <div class="sidebar-heading"><span>STATUS</span></div>
-          <button v-for="item in utilityEndpoints" :key="item.operation" class="endpoint-item" :class="{ active: operation === item.operation }" @click="selectOperation(item.operation)">
-            <span class="method" :class="item.method.toLowerCase()">{{ item.method }}</span><span class="endpoint-label">{{ item.label }}</span>
-          </button>
-        </div>
-        <div class="sidebar-section recent-section">
-          <div class="sidebar-heading"><span>RECENT · {{ clientId }}</span><button class="icon-button" title="Refresh recent requests" aria-label="Refresh recent requests" @click="refreshHistory">↻</button></div>
-          <p v-if="!history.length" class="sidebar-empty">Create a request to see it here.</p>
-          <button v-for="item in history" :key="item.id" class="recent-item" :class="{ active: requestId === item.id }" :aria-pressed="requestId === item.id" @click="selectRequest(item)">
-            <span class="recent-title">{{ item.title }}</span>
-            <span class="recent-meta"><span>{{ item.clientId }} · {{ item.id.slice(0, 8) }}</span><span class="state-dot" :class="item.status"></span></span>
-          </button>
-        </div>
-        <div class="sidebar-footer"><span class="footer-dot"></span>Development only<span class="footer-version">v0.1</span></div>
+        <section class="nav-block">
+          <div class="nav-heading"><span>Requests</span><span>{{ requestEndpoints.length }}</span></div>
+          <div class="nav-list">
+            <button v-for="item in requestEndpoints" :key="item.operation" type="button" :aria-pressed="operation === item.operation" @click="selectOperation(item.operation)">
+              <span class="method" :class="{ post: item.method === 'POST' }">{{ item.method }}</span>{{ item.label }}
+            </button>
+          </div>
+        </section>
+        <section class="nav-block">
+          <div class="nav-heading"><span>Client keys</span><span>{{ keyEndpoints.length }}</span></div>
+          <div class="nav-list">
+            <button v-for="item in keyEndpoints" :key="item.operation" type="button" :aria-pressed="operation === item.operation" @click="selectOperation(item.operation)">
+              <span class="method" :class="{ post: item.method === 'POST' }">{{ item.method }}</span>{{ item.label }}
+            </button>
+          </div>
+        </section>
+        <section class="nav-block">
+          <div class="nav-heading">Status</div>
+          <div class="nav-list">
+            <button v-for="item in utilityEndpoints" :key="item.operation" type="button" :aria-pressed="operation === item.operation" @click="selectOperation(item.operation)">
+              <span class="method">{{ item.method }}</span>{{ item.label }}
+            </button>
+          </div>
+        </section>
+        <section class="nav-block recent">
+          <div class="nav-heading">
+            <span>Recent · {{ clientId }}</span>
+            <button type="button" class="outline" title="Refresh recent requests" aria-label="Refresh recent requests" @click="refreshHistory">Refresh</button>
+          </div>
+          <p v-if="!history.length" class="hint">Create a request to see it here.</p>
+          <div class="nav-list">
+            <button v-for="item in history" :key="item.id" type="button" class="recent-item" :aria-pressed="requestId === item.id" @click="selectRequest(item)">
+              <span>{{ item.title }}</span>
+              <span class="recent-meta"><span>{{ item.clientId }} · {{ item.id.slice(0, 8) }}</span><span class="dot" :class="statusClass(item.status)"></span></span>
+            </button>
+          </div>
+        </section>
+        <div class="sidebar-foot"><span class="dot ok"></span>Development only<span class="meta">v0.1</span></div>
       </aside>
 
-      <div class="workbench">
-        <div class="document-tab"><span class="tab-method" :class="endpoint.method.toLowerCase()">{{ endpoint.method }}</span>{{ endpoint.label }}<span class="tab-dot"></span></div>
-        <section class="request-section">
-          <div class="section-title-row"><div><p class="kicker">REQUEST BUILDER</p><h1>{{ endpoint.label }}</h1></div><span class="scope-label">{{ mode === 'simulated' ? 'SIMULATION' : 'LIVE GATEWAY' }}</span></div>
-          <div class="request-bar">
-            <span class="request-method" :class="endpoint.method.toLowerCase()">{{ endpoint.method }}<span class="chevron">⌄</span></span>
-            <div class="url-field"><span class="url-origin">{{ mode === 'simulated' ? 'simulated://jagate' : bootstrap?.gatewayUrl }}</span><strong>{{ requestPath }}</strong></div>
-            <button class="send-button" :disabled="busy || !clientId || (needsRequestId && !requestId) || (needsKeyId && !keyId) || (auth === 'scoped' && !scopedKey)" @click="execute(operation)">{{ busy ? 'Sending…' : 'Send' }} <span>➜</span></button>
-          </div>
-          <div class="request-tabs" role="tablist" aria-label="Request editor">
-            <button role="tab" :aria-selected="requestTab === 'body'" :class="{ active: requestTab === 'body' }" @click="requestTab = 'body'">{{ needsRequestId || needsKeyId ? 'Params & body' : operation === 'create' || operation === 'keyCreate' ? 'Body' : operation === 'list' || operation === 'keyList' || operation === 'audit' ? 'Filters' : 'Overview' }}</button>
-            <button role="tab" :aria-selected="requestTab === 'preview'" :class="{ active: requestTab === 'preview' }" @click="requestTab = 'preview'">JSON preview</button>
-            <span class="tabs-spacer"></span><span class="auth-summary">Authorization <strong>{{ auth === 'valid' ? 'Bootstrap key' : auth === 'scoped' ? 'Issued key' : auth === 'missing' ? 'None' : 'Invalid key' }}</strong></span>
-          </div>
-
-          <div v-if="requestTab === 'preview'" class="editor-body preview-body">
-            <div class="editor-caption"><span>{{ operation === 'list' || operation === 'events' || operation === 'keyList' || operation === 'audit' ? 'QUERY PARAMETERS' : 'REQUEST BODY' }}</span><span>Read only preview</span></div>
-            <pre>{{ JSON.stringify(previewBody, null, 2) }}</pre>
-            <p v-if="operation === 'create' || operation === 'result' || operation === 'keyCreate'" class="help-text">Edit values in the {{ needsRequestId ? 'Params & body' : 'Body' }} tab.</p>
-            <p v-else-if="operation !== 'list' && operation !== 'events' && operation !== 'keyList' && operation !== 'audit'" class="help-text">This endpoint does not require a request body.</p>
+      <main class="workspace">
+        <p v-if="simulatedExample" class="context"><strong>{{ simulatedExample.label }}</strong> (<code>{{ clientId }}</code>) is a client: an application or automation that asks JaGate for approval before it can {{ simulatedExample.scenario }}. Each client has its own requests, keys, Telegram chat, and approver. Selecting another client loads its sample request.</p>
+        <article>
+          <header class="panel-head">
+            <div>
+              <p class="eyebrow">Request builder</p>
+              <h2>{{ endpoint.label }}</h2>
+            </div>
+            <span class="meta">{{ mode === 'simulated' ? 'SIMULATION' : 'LIVE GATEWAY' }}</span>
+          </header>
+          <div class="request-line">
+            <span class="method" :class="{ post: endpoint.method === 'POST' }">{{ endpoint.method }}</span>
+            <code>{{ mode === 'simulated' ? 'simulated://jagate' : bootstrap?.gatewayUrl }}<strong>{{ requestPath }}</strong></code>
+            <button type="button" :aria-busy="busy" :disabled="busy || !clientId || (needsRequestId && !requestId) || (needsKeyId && !keyId) || (auth === 'scoped' && !scopedKey)" @click="execute(operation)">{{ busy ? 'Sending…' : 'Send' }}</button>
           </div>
 
-          <div v-else class="editor-body">
+          <div class="editor-bar">
+            <div class="tabs" role="tablist" aria-label="Request editor">
+              <button type="button" role="tab" :aria-selected="requestTab === 'body'" @click="requestTab = 'body'">{{ requestTabLabel }}</button>
+              <button type="button" role="tab" :aria-selected="requestTab === 'preview'" @click="requestTab = 'preview'">JSON preview</button>
+            </div>
+            <span class="muted">Authorization <strong>{{ authSummary }}</strong></span>
+          </div>
+
+          <div v-if="requestTab === 'preview'">
+            <p class="section-label"><span>{{ operation === 'list' || operation === 'events' || operation === 'keyList' || operation === 'audit' ? 'Query parameters' : 'Request body' }}</span><span>Read only preview</span></p>
+            <pre><code>{{ JSON.stringify(previewBody, null, 2) }}</code></pre>
+            <p v-if="operation === 'create' || operation === 'result' || operation === 'keyCreate'" class="hint">Edit values in the {{ needsRequestId ? 'Params & body' : 'Body' }} tab.</p>
+            <p v-else-if="operation !== 'list' && operation !== 'events' && operation !== 'keyList' && operation !== 'audit'" class="hint">This endpoint does not require a request body.</p>
+          </div>
+
+          <div v-else>
             <template v-if="operation === 'create'">
-              <div class="editor-caption"><span>APPLICATION / JSON</span><span>Approval payload</span></div>
-              <div class="form-grid">
+              <p class="section-label"><span>Application / JSON</span><span>Approval payload</span></p>
+              <div class="fields">
                 <label>Idempotency key<input v-model="key" maxlength="128" /></label>
                 <label>Action<input v-model="action" maxlength="64" /></label>
                 <label class="span-2">Title<input v-model="title" maxlength="100" /></label>
-                <label class="span-2">Description<textarea v-model="description" rows="2" maxlength="1000" /></label>
+                <label class="span-2">Description<textarea v-model="description" rows="2" maxlength="1000"></textarea></label>
                 <label>Expires in seconds<input v-model.number="expiresInSeconds" type="number" min="60" max="86400" /></label>
-                <div class="field-aside"><button class="subtle-button" @click="key = 'playground:' + Date.now()">↻ Generate new key</button><span>Reuse the key to test idempotency.</span></div>
-                <label class="span-2">Details <span class="label-type">JSON array</span><textarea v-model="detailsText" rows="2" spellcheck="false" class="code-input" /></label>
-                <label class="span-2">Metadata <span class="label-type">JSON object</span><textarea v-model="metadataText" rows="2" spellcheck="false" class="code-input" /></label>
+                <div>
+                  <button type="button" class="outline" @click="key = 'playground:' + Date.now()">Generate new key</button>
+                  <p class="hint">Reuse the key to test idempotency.</p>
+                </div>
+                <label class="span-2">Details <span class="muted">JSON array</span><textarea v-model="detailsText" rows="2" spellcheck="false"></textarea></label>
+                <label class="span-2">Metadata <span class="muted">JSON object</span><textarea v-model="metadataText" rows="2" spellcheck="false"></textarea></label>
               </div>
             </template>
             <template v-else-if="operation === 'list'">
-              <div class="editor-caption"><span>QUERY PARAMETERS</span><span>Only the selected client's requests</span></div>
-              <div class="attention-shortcuts" role="group" aria-label="Requests needing attention">
+              <p class="section-label"><span>Query parameters</span><span>Only the selected client's requests</span></p>
+              <div class="attention" role="group" aria-label="Requests needing attention">
                 <strong>Requests needing attention</strong>
-                <div class="attention-actions">
-                  <button type="button" class="utility-button" :disabled="busy" @click="applyAttention('delivery')">Failed delivery</button>
-                  <button type="button" class="utility-button" :disabled="busy" @click="applyAttention('claimed')">Old claims</button>
-                  <button type="button" class="utility-button" :disabled="busy" @click="applyAttention('expiry')">Expiring soon</button>
-                  <button type="button" class="utility-button" :disabled="busy" @click="applyAttention('all')">Clear filters</button>
-                </div>
-                <label>Window (minutes)<input v-model.number="attentionMinutes" type="number" min="1" max="1440" /></label>
+                <button type="button" class="outline" :disabled="busy" @click="applyAttention('delivery')">Failed delivery</button>
+                <button type="button" class="outline" :disabled="busy" @click="applyAttention('claimed')">Old claims</button>
+                <button type="button" class="outline" :disabled="busy" @click="applyAttention('expiry')">Expiring soon</button>
+                <button type="button" class="outline" :disabled="busy" @click="applyAttention('all')">Clear filters</button>
+                <label for="attention-window">Window (minutes)<input id="attention-window" v-model.number="attentionMinutes" type="number" min="1" max="1440" /></label>
               </div>
-              <div class="form-grid list-filter-grid">
-                <label>Decision status<select v-model="listStatus"><option value="">Any</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="expired">Expired</option><option value="cancelled">Cancelled</option></select></label>
-                <label>Delivery status<select v-model="listDeliveryStatus"><option value="">Any</option><option value="pending">Pending</option><option value="retrying">Retrying</option><option value="delivered">Delivered</option><option value="failed">Failed</option></select></label>
-                <label>Execution status<select v-model="listExecutionStatus"><option value="">Any</option><option value="unclaimed">Unclaimed</option><option value="claimed">Claimed</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option></select></label>
+              <div class="fields">
+                <label>Decision status
+                  <select v-model="listStatus" aria-label="Decision status">
+                    <option value="">Any</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="expired">Expired</option><option value="cancelled">Cancelled</option>
+                  </select>
+                </label>
+                <label>Delivery status
+                  <select v-model="listDeliveryStatus" aria-label="Delivery status">
+                    <option value="">Any</option><option value="pending">Pending</option><option value="retrying">Retrying</option><option value="delivered">Delivered</option><option value="failed">Failed</option>
+                  </select>
+                </label>
+                <label>Execution status
+                  <select v-model="listExecutionStatus" aria-label="Execution status">
+                    <option value="">Any</option><option value="unclaimed">Unclaimed</option><option value="claimed">Claimed</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option>
+                  </select>
+                </label>
                 <label>Page size<input v-model.number="listLimit" type="number" min="1" max="100" /></label>
-                <label>Claimed before <span class="label-type">UTC ISO 8601</span><input v-model.trim="listClaimedBefore" type="text" placeholder="2026-10-05T12:00:00.000Z" spellcheck="false" /></label>
-                <label>Expires before <span class="label-type">UTC ISO 8601</span><input v-model.trim="listExpiresBefore" type="text" placeholder="2026-10-05T12:00:00.000Z" spellcheck="false" /></label>
+                <label>Claimed before <span class="muted">UTC ISO 8601</span><input v-model.trim="listClaimedBefore" placeholder="2026-10-05T12:00:00.000Z" spellcheck="false" /></label>
+                <label>Expires before <span class="muted">UTC ISO 8601</span><input v-model.trim="listExpiresBefore" placeholder="2026-10-05T12:00:00.000Z" spellcheck="false" /></label>
               </div>
-              <p class="help-text">Shortcuts set fixed UTC cutoffs using the selected clock. Send to load a page; keep those cutoffs when paging. Old claims need reconciliation before any retry.</p>
+              <p class="hint">Shortcuts set fixed UTC cutoffs using the selected clock. Send to load a page; keep those cutoffs when paging. Old claims need reconciliation before any retry.</p>
             </template>
             <template v-else-if="operation === 'keyCreate'">
-              <div class="editor-caption"><span>APPLICATION / JSON</span><span>Bootstrap key required</span></div>
-              <div class="form-grid"><label class="span-2">Key label<input v-model="keyLabel" maxlength="80" placeholder="Name the app or worker" /></label><label class="span-2">Expires at <span class="label-type">optional UTC ISO 8601</span><input v-model.trim="keyExpiresAt" placeholder="2026-10-05T22:00:00.000Z" spellcheck="false" /></label></div>
-              <div class="key-expiry-actions"><button type="button" class="subtle-button" @click="setKeyExpiryOneHour">Set 1 hour from now</button><button type="button" class="subtle-button" @click="keyExpiresAt = ''">No expiry</button></div>
-              <fieldset class="scope-fieldset"><legend>Allowed request operations</legend><label v-for="scope in availableKeyScopes" :key="scope" class="scope-option"><input v-model="keyScopes" type="checkbox" :value="scope" />{{ scope }}</label></fieldset>
-              <p class="help-text">The new key appears only in the creation response. An optional expiry blocks later requests at that time. It also fills the Issued key field for this browser session; copy it before leaving.</p>
+              <p class="section-label"><span>Application / JSON</span><span>Bootstrap key required</span></p>
+              <div class="fields">
+                <label class="span-2">Key label<input v-model="keyLabel" maxlength="80" placeholder="Name the app or worker" /></label>
+                <label class="span-2">Expires at <span class="muted">optional UTC ISO 8601</span><input v-model.trim="keyExpiresAt" placeholder="2026-10-05T22:00:00.000Z" spellcheck="false" /></label>
+              </div>
+              <div class="actions">
+                <button type="button" class="outline" @click="setKeyExpiryOneHour">Set 1 hour from now</button>
+                <button type="button" class="outline" @click="keyExpiresAt = ''">No expiry</button>
+              </div>
+              <fieldset>
+                <legend>Allowed request operations</legend>
+                <div class="scopes">
+                  <label v-for="scope in availableKeyScopes" :key="scope"><input type="checkbox" :checked="keyScopes.includes(scope)" @change="onScopeChange(scope, $event)" />{{ scope }}</label>
+                </div>
+              </fieldset>
+              <p class="hint">The new key appears only in the creation response. An optional expiry blocks later requests at that time. It also fills the Issued key field for this browser session; copy it before leaving.</p>
             </template>
             <template v-else-if="operation === 'keyList'">
-              <div class="editor-caption"><span>QUERY PARAMETERS</span><span>Bootstrap key required</span></div>
-              <div class="form-grid"><label>Page size<input v-model.number="keyLimit" type="number" min="1" max="100" /></label></div>
-              <p class="help-text">Lists this client's issued keys, including revoked keys. Secret values are never returned here.</p>
+              <p class="section-label"><span>Query parameters</span><span>Bootstrap key required</span></p>
+              <label>Page size<input v-model.number="keyLimit" type="number" min="1" max="100" /></label>
+              <p class="hint">Lists this client's issued keys, including revoked keys. Secret values are never returned here.</p>
             </template>
             <template v-else-if="operation === 'keyRevoke'">
-              <div class="editor-caption"><span>PATH PARAMETERS</span><span>Bootstrap key required</span></div>
-              <div class="form-grid"><label class="span-2">Client key ID<input v-model="keyId" placeholder="Select a listed key or paste its UUID" spellcheck="false" /></label></div>
-              <p class="help-text">Revocation takes effect on the next API request. The configured bootstrap key is rotated in .env, not here.</p>
+              <p class="section-label"><span>Path parameters</span><span>Bootstrap key required</span></p>
+              <label>Client key ID<input v-model="keyId" placeholder="Select a listed key or paste its UUID" spellcheck="false" /></label>
+              <p class="hint">Revocation takes effect on the next API request. The configured bootstrap key is rotated in .env, not here.</p>
             </template>
             <template v-else-if="operation === 'audit'">
-              <div class="editor-caption"><span>QUERY PARAMETERS</span><span>Bootstrap key required · selected client only</span></div>
-              <div class="form-grid"><label>Page size<input v-model.number="auditLimit" type="number" min="1" max="100" /></label><label>Request ID <span class="label-type">optional</span><input v-model.trim="auditRequestId" placeholder="Filter by request UUID" spellcheck="false" /></label><label>Client key ID <span class="label-type">optional</span><input v-model.trim="auditKeyId" placeholder="Actor or affected key UUID" spellcheck="false" /></label></div>
-              <p class="help-text">Newest first. Records successful request creation, claims, results, key issuance, and revocation. Only key IDs are stored; secrets never appear here.</p>
+              <p class="section-label"><span>Query parameters</span><span>Bootstrap key required · selected client only</span></p>
+              <div class="fields">
+                <label>Page size<input v-model.number="auditLimit" type="number" min="1" max="100" /></label>
+                <label>Request ID <span class="muted">optional</span><input v-model.trim="auditRequestId" placeholder="Filter by request UUID" spellcheck="false" /></label>
+                <label class="span-2">Client key ID <span class="muted">optional</span><input v-model.trim="auditKeyId" placeholder="Actor or affected key UUID" spellcheck="false" /></label>
+              </div>
+              <p class="hint">Newest first. Records successful request creation, claims, results, key issuance, and revocation. Only key IDs are stored; secrets never appear here.</p>
             </template>
             <template v-else-if="needsRequestId">
-              <div class="editor-caption"><span>PATH PARAMETERS</span><span>Required</span></div>
-              <div class="form-grid"><label class="span-2">Request ID<input v-model="requestId" placeholder="Select a recent request or paste its UUID" spellcheck="false" /></label></div>
-              <div v-if="operation === 'events'" class="form-grid timeline-options"><label>Page size<input v-model.number="eventLimit" type="number" min="1" max="100" /></label><p class="help-text">Oldest events first. Each event records a gateway state change; no action is executed here.</p></div>
+              <p class="section-label"><span>Path parameters</span><span>Required</span></p>
+              <label>Request ID<input v-model="requestId" placeholder="Select a recent request or paste its UUID" spellcheck="false" /></label>
+              <label v-if="operation === 'events'">Page size<input v-model.number="eventLimit" type="number" min="1" max="100" /></label>
+              <p v-if="operation === 'events'" class="hint">Oldest events first. Each event records a gateway state change; no action is executed here.</p>
               <template v-if="operation === 'result'">
-                <div class="editor-caption body-caption"><span>APPLICATION / JSON</span><span>Execution result</span></div>
-                <div class="form-grid">
-                  <label class="span-2">Claim token<div class="token-field"><input v-model="claimToken" :type="showClaimToken ? 'text' : 'password'" autocomplete="off" placeholder="Filled after a successful claim" /><button class="subtle-button" @click="showClaimToken = !showClaimToken">{{ showClaimToken ? 'Hide' : 'Show' }}</button></div></label>
-                  <label>Result<select v-model="resultStatus"><option value="succeeded">Succeeded</option><option value="failed">Failed</option></select></label>
+                <p class="section-label"><span>Application / JSON</span><span>Execution result</span></p>
+                <div class="fields">
+                  <div class="span-2 inline-field">
+                    <label for="claim-token">Claim token</label>
+                    <input id="claim-token" v-model="claimToken" :type="showClaimToken ? 'text' : 'password'" autocomplete="off" placeholder="Filled after a successful claim" />
+                    <button type="button" class="outline" :aria-label="showClaimToken ? 'Hide claim token' : 'Show claim token'" @click="showClaimToken = !showClaimToken">{{ showClaimToken ? 'Hide' : 'Show' }}</button>
+                  </div>
+                  <label>Result
+                    <select v-model="resultStatus" aria-label="Result">
+                      <option value="succeeded">Succeeded</option>
+                      <option value="failed">Failed</option>
+                    </select>
+                  </label>
                   <label>Summary<input v-model="resultSummary" maxlength="300" /></label>
                 </div>
-                <p class="help-text">This reports an outcome. The playground does not execute the proposed action.</p>
+                <p class="hint">This reports an outcome. The playground does not execute the proposed action.</p>
               </template>
-              <div v-else-if="selected" class="request-facts">
-                <div><span>DECISION</span><strong>{{ selected.status }}</strong></div><div><span>DELIVERY</span><strong>{{ selected.deliveryStatus }}</strong></div>
-                <div><span>EXECUTION</span><strong>{{ selected.executionStatus }}</strong></div><div><span>EXPIRES</span><strong>{{ new Date(selected.expiresAt).toLocaleString() }}</strong></div>
+              <div v-else-if="selected" class="facts">
+                <div><small>DECISION</small><strong>{{ selected.status }}</strong></div>
+                <div><small>DELIVERY</small><strong>{{ selected.deliveryStatus }}</strong></div>
+                <div><small>EXECUTION</small><strong>{{ selected.executionStatus }}</strong></div>
+                <div><small>EXPIRES</small><strong>{{ new Date(selected.expiresAt).toLocaleString() }}</strong></div>
               </div>
-              <p v-if="operation === 'claim'" class="help-text">Claim an approved request once. The token appears in the response and fills the report form.</p>
-              <p v-if="operation === 'cancel'" class="help-text">Cancels a pending approval. The request cannot be decided afterward.</p>
+              <p v-if="operation === 'claim'" class="hint">Claim an approved request once. The token appears in the response and fills the report form.</p>
+              <p v-if="operation === 'cancel'" class="hint">Cancels a pending approval. The request cannot be decided afterward.</p>
             </template>
             <template v-else>
-              <div class="overview-state"><span class="overview-icon">↗</span><div><strong>{{ operation === 'health' ? 'Gateway health' : 'Gateway readiness' }}</strong><p>This public endpoint does not require authorization or a request body. Click Send to inspect its response.</p></div></div>
+              <p><strong>{{ operation === 'health' ? 'Gateway health' : 'Gateway readiness' }}</strong></p>
+              <p class="hint">This public endpoint does not require authorization or a request body. Click Send to inspect its response.</p>
             </template>
           </div>
-        </section>
+        </article>
 
-        <section v-if="operation === 'events' && eventPage" class="timeline-results" aria-label="Request timeline">
-          <div class="list-results-heading"><strong>Request timeline</strong><span>{{ eventPage.items.length }} shown</span></div>
-          <p v-if="!eventPage.items.length" class="list-empty">No more events for this request.</p>
-          <ol v-else class="timeline-list">
-            <li v-for="event in eventPage.items" :key="event.sequence" class="timeline-event">
-              <span class="timeline-marker" aria-hidden="true"></span>
-              <div class="timeline-event-content"><strong>{{ eventLabel(event.type) }}</strong><span class="timeline-meta">#{{ event.sequence }} · <time :datetime="event.occurredAt">{{ new Date(event.occurredAt).toLocaleString() }}</time><template v-if="event.actorId"> · Approver {{ event.actorId }}</template><template v-if="event.attempt"> · Attempt {{ event.attempt }}</template></span></div>
+        <article v-if="operation === 'events' && eventPage" aria-label="Request timeline">
+          <header class="panel-head"><h3>Request timeline</h3><span class="muted">{{ eventPage.items.length }} shown</span></header>
+          <p v-if="!eventPage.items.length" class="hint">No more events for this request.</p>
+          <ol v-else class="timeline">
+            <li v-for="event in eventPage.items" :key="event.sequence">
+              <span class="dot" :class="statusClass(event.type)"></span>
+              <div><strong>{{ eventLabel(event.type) }}</strong><small>#{{ event.sequence }} · <time :datetime="event.occurredAt">{{ new Date(event.occurredAt).toLocaleString() }}</time><template v-if="event.actorId"> · Approver {{ event.actorId }}</template><template v-if="event.attempt"> · Attempt {{ event.attempt }}</template></small></div>
             </li>
           </ol>
-          <div class="list-pagination"><span>Page {{ eventCursorStack.length + 1 }}</span><div class="list-pagination-actions"><button class="utility-button" :disabled="busy || !eventCursorStack.length" @click="previousEventPage">← Previous</button><button class="utility-button" :disabled="busy || !eventPage.nextCursor" @click="nextEventPage">Next →</button></div></div>
-        </section>
+          <div class="pager"><span>Page {{ eventCursorStack.length + 1 }}</span><div class="actions"><button type="button" class="outline" :disabled="busy || !eventCursorStack.length" @click="previousEventPage">Previous</button><button type="button" class="outline" :disabled="busy || !eventPage.nextCursor" @click="nextEventPage">Next</button></div></div>
+        </article>
 
-        <section v-if="operation === 'list' && listPage" class="list-results" aria-label="Listed requests">
-          <div class="list-results-heading"><strong>Requests in this page</strong><span>{{ listPage.items.length }} shown</span></div>
-          <p v-if="!listPage.items.length" class="list-empty">No requests match these filters.</p>
-          <button v-for="item in listPage.items" :key="item.id" class="list-result" @click="selectRequest(item)">
-            <span><strong>{{ item.title }}</strong><small>{{ item.id }} · {{ new Date(item.createdAt).toLocaleString() }}</small><small>Delivery: {{ item.deliveryStatus }} · Execution: {{ item.executionStatus }}<template v-if="item.claimedAt"> · Claimed: {{ new Date(item.claimedAt).toLocaleString() }}</template><template v-if="item.status === 'pending'"> · Expires: {{ new Date(item.expiresAt).toLocaleString() }}</template></small></span>
-            <span class="list-result-status">{{ item.status }} <span aria-hidden="true">→</span></span>
+        <article v-if="operation === 'list' && listPage" aria-label="Listed requests">
+          <header class="panel-head"><h3>Requests in this page</h3><span class="muted">{{ listPage.items.length }} shown</span></header>
+          <p v-if="!listPage.items.length" class="hint">No requests match these filters.</p>
+          <button v-for="item in listPage.items" :key="item.id" type="button" class="row-button" @click="selectRequest(item)">
+            <span class="row-copy"><strong>{{ item.title }}</strong><small>{{ item.id }} · {{ new Date(item.createdAt).toLocaleString() }}</small><small>Delivery: {{ item.deliveryStatus }} · Execution: {{ item.executionStatus }}<template v-if="item.claimedAt"> · Claimed: {{ new Date(item.claimedAt).toLocaleString() }}</template><template v-if="item.status === 'pending'"> · Expires: {{ new Date(item.expiresAt).toLocaleString() }}</template></small></span>
+            <span class="muted">{{ item.status }}</span>
           </button>
-          <div class="list-pagination"><span>Page {{ listCursorStack.length + 1 }}</span><div class="list-pagination-actions"><button class="utility-button" :disabled="busy || !listCursorStack.length" @click="previousPage">← Previous</button><button class="utility-button" :disabled="busy || !listPage.nextCursor" @click="nextPage">Next →</button></div></div>
-        </section>
+          <div class="pager"><span>Page {{ listCursorStack.length + 1 }}</span><div class="actions"><button type="button" class="outline" :disabled="busy || !listCursorStack.length" @click="previousPage">Previous</button><button type="button" class="outline" :disabled="busy || !listPage.nextCursor" @click="nextPage">Next</button></div></div>
+        </article>
 
-        <section v-if="operation === 'keyList' && keyPage" class="list-results" aria-label="Listed client keys">
-          <div class="list-results-heading"><strong>Client keys in this page</strong><span>{{ keyPage.items.length }} shown</span></div>
-          <p v-if="!keyPage.items.length" class="list-empty">No issued keys on this page.</p>
-          <button v-for="item in keyPage.items" :key="item.id" class="list-result" @click="selectClientKey(item)">
-            <span><strong>{{ item.label }}</strong><small>{{ item.id }} · {{ item.scopes.join(', ') }}</small><small>{{ item.expiresAt ? 'Expires: ' + new Date(item.expiresAt).toLocaleString() : 'No expiry' }}</small></span>
-            <span class="list-result-status">{{ item.revokedAt ? 'Revoked' : item.expiresAt && Date.parse(item.expiresAt) <= Date.now() + (mode === 'simulated' ? simulatedClockOffset : 0) ? 'Expired' : 'Active' }} <span aria-hidden="true">→</span></span>
+        <article v-if="operation === 'keyList' && keyPage" aria-label="Listed client keys">
+          <header class="panel-head"><h3>Client keys in this page</h3><span class="muted">{{ keyPage.items.length }} shown</span></header>
+          <p v-if="!keyPage.items.length" class="hint">No issued keys on this page.</p>
+          <button v-for="item in keyPage.items" :key="item.id" type="button" class="row-button" @click="selectClientKey(item)">
+            <span class="row-copy"><strong>{{ item.label }}</strong><small>{{ item.id }} · {{ item.scopes.join(', ') }}</small><small>{{ item.expiresAt ? 'Expires: ' + new Date(item.expiresAt).toLocaleString() : 'No expiry' }}</small></span>
+            <span class="muted">{{ keyState(item) }}</span>
           </button>
-          <div class="list-pagination"><span>Page {{ keyCursorStack.length + 1 }}</span><div class="list-pagination-actions"><button class="utility-button" :disabled="busy || !keyCursorStack.length" @click="previousKeyPage">← Previous</button><button class="utility-button" :disabled="busy || !keyPage.nextCursor" @click="nextKeyPage">Next →</button></div></div>
-        </section>
+          <div class="pager"><span>Page {{ keyCursorStack.length + 1 }}</span><div class="actions"><button type="button" class="outline" :disabled="busy || !keyCursorStack.length" @click="previousKeyPage">Previous</button><button type="button" class="outline" :disabled="busy || !keyPage.nextCursor" @click="nextKeyPage">Next</button></div></div>
+        </article>
 
-        <section v-if="operation === 'audit' && auditPage" class="list-results" aria-label="Audit events">
-          <div class="list-results-heading"><strong>Client audit events</strong><span>{{ auditPage.items.length }} shown</span></div>
-          <p v-if="!auditPage.items.length" class="list-empty">No audit events match these filters.</p>
-          <div v-for="event in auditPage.items" :key="event.id" class="audit-result">
-            <strong>{{ event.type }}</strong><small>#{{ event.id }} · <time :datetime="event.occurredAt">{{ new Date(event.occurredAt).toLocaleString() }}</time> · {{ event.actor === 'bootstrap' ? 'Bootstrap key' : 'Issued key ' + event.actorKeyId }}</small>
-            <small v-if="event.requestId">Request {{ event.requestId }}</small><small v-if="event.subjectKeyId">Client key {{ event.subjectKeyId }}</small>
+        <article v-if="operation === 'audit' && auditPage" aria-label="Audit events">
+          <header class="panel-head"><h3>Client audit events</h3><span class="muted">{{ auditPage.items.length }} shown</span></header>
+          <p v-if="!auditPage.items.length" class="hint">No audit events match these filters.</p>
+          <div v-for="event in auditPage.items" :key="event.id" class="row-copy">
+            <strong>{{ event.type }}</strong>
+            <small>#{{ event.id }} · <time :datetime="event.occurredAt">{{ new Date(event.occurredAt).toLocaleString() }}</time> · {{ event.actor === 'bootstrap' ? 'Bootstrap key' : 'Issued key ' + event.actorKeyId }}</small>
+            <small v-if="event.requestId">Request {{ event.requestId }}</small>
+            <small v-if="event.subjectKeyId">Client key {{ event.subjectKeyId }}</small>
           </div>
-          <div class="list-pagination"><span>Page {{ auditCursorStack.length + 1 }}</span><div class="list-pagination-actions"><button class="utility-button" :disabled="busy || !auditCursorStack.length" @click="previousAuditPage">← Previous</button><button class="utility-button" :disabled="busy || !auditPage.nextCursor" @click="nextAuditPage">Next →</button></div></div>
-        </section>
+          <div class="pager"><span>Page {{ auditCursorStack.length + 1 }}</span><div class="actions"><button type="button" class="outline" :disabled="busy || !auditCursorStack.length" @click="previousAuditPage">Previous</button><button type="button" class="outline" :disabled="busy || !auditPage.nextCursor" @click="nextAuditPage">Next</button></div></div>
+        </article>
 
-        <section v-if="mode === 'simulated'" class="simulation-strip">
-          <div class="simulation-intro"><span class="simulation-icon">◎</span><div><strong>Simulation controls</strong><span>Drive the Telegram decision and time locally.</span></div></div>
-          <div class="simulation-controls"><select v-model="actor" aria-label="Decision actor"><option value="allowed">Allowlisted approver</option><option value="outsider">Outsider</option></select><button class="utility-button" :disabled="busy || !requestId" @click="decide('approve')">Approve</button><button class="utility-button" :disabled="busy || !requestId" @click="decide('reject')">Reject</button><div class="control-divider"></div><input v-model.number="advanceSeconds" type="number" min="1" max="86400" aria-label="Seconds to advance" /><span class="seconds-label">sec</span><button class="utility-button" :disabled="busy" @click="advanceTime">Advance clock</button></div>
-        </section>
-        <section v-else class="simulation-strip live-strip"><span class="simulation-icon">↗</span><span>Approve or reject in your configured Telegram chat, then send <strong>Get request</strong> to refresh its state.</span></section>
+        <article v-if="mode === 'simulated'">
+          <div class="simulation">
+            <div><strong>Simulation controls</strong><p class="hint">Drive the Telegram decision and time locally.</p></div>
+            <div class="actions">
+              <label>Decision actor
+                <select v-model="actor" aria-label="Decision actor">
+                  <option value="allowed">Allowlisted approver</option>
+                  <option value="outsider">Outsider</option>
+                </select>
+              </label>
+              <button type="button" class="outline" :disabled="busy || !requestId" @click="decide('approve')">Approve</button>
+              <button type="button" class="outline" :disabled="busy || !requestId" @click="decide('reject')">Reject</button>
+              <label>Seconds<input v-model.number="advanceSeconds" type="number" min="1" max="86400" aria-label="Seconds to advance" /></label>
+              <button type="button" class="outline" :disabled="busy" @click="advanceTime">Advance clock</button>
+            </div>
+          </div>
+        </article>
+        <article v-else><p class="hint">Approve or reject in your configured Telegram chat, then send <strong>Get request</strong> to refresh its state.</p></article>
 
-        <section class="response-section">
-          <div class="response-heading"><div><p class="kicker">RESPONSE</p><h2>Output</h2></div><div v-if="visibleEntry" class="response-summary"><span class="http-status" :class="visibleEntry.status >= 400 ? 'error' : 'success'">HTTP {{ visibleEntry.status }}</span><span>{{ visibleEntry.time }}</span></div></div>
-          <div class="response-tabs" role="tablist" aria-label="Response view"><button role="tab" :aria-selected="responseTab === 'body'" :class="{ active: responseTab === 'body' }" @click="responseTab = 'body'">Body</button><button role="tab" :aria-selected="responseTab === 'history'" :class="{ active: responseTab === 'history' }" @click="responseTab = 'history'">History <span class="history-count">{{ entries.length }}</span></button><span class="tabs-spacer"></span><button v-if="visibleEntry && responseTab === 'body'" class="copy-button" @click="copyResponse">{{ copied ? 'Copied' : 'Copy JSON' }}</button></div>
-          <div v-if="responseTab === 'body'" class="response-body"><div v-if="visibleEntry" class="response-code"><div class="response-code-header"><span>{{ visibleEntry.label }}</span><span>JSON</span></div><pre>{{ JSON.stringify(visibleEntry.body, null, 2) }}</pre></div><div v-else class="response-empty"><span>↳</span><strong>Waiting for a request</strong><p>Send the selected request to see its response.<template v-if="entries.length"> Previous responses remain in History.</template></p></div></div>
-          <div v-else class="history-body"><div v-if="!entries.length" class="response-empty">No responses in this session yet.</div><button v-for="(entry, index) in entries" :key="index" class="history-item" :class="{ active: activeEntry === index }" @click="activeEntry = index; responseTab = 'body'"><span class="history-status" :class="entry.status >= 400 ? 'error' : 'success'">{{ entry.status }}</span><strong>{{ entry.label }}</strong><time>{{ entry.time }}</time><span>→</span></button></div>
-        </section>
-      </div>
-    </main>
+        <article>
+          <header class="response-head">
+            <div><p class="eyebrow">Response</p><h2>Output</h2></div>
+            <div v-if="visibleEntry" class="meta"><strong :class="visibleEntry.status >= 400 ? 'status-bad' : 'status-ok'">HTTP {{ visibleEntry.status }}</strong> {{ visibleEntry.time }}</div>
+          </header>
+          <div class="editor-bar">
+            <div class="tabs" role="tablist" aria-label="Response view">
+              <button type="button" role="tab" :aria-selected="responseTab === 'body'" @click="responseTab = 'body'">Body</button>
+              <button type="button" role="tab" :aria-selected="responseTab === 'history'" @click="responseTab = 'history'">History ({{ entries.length }})</button>
+            </div>
+            <button v-if="visibleEntry && responseTab === 'body'" type="button" class="outline" @click="copyResponse">{{ copied ? 'Copied' : 'Copy JSON' }}</button>
+          </div>
+          <div v-if="responseTab === 'body'" class="output">
+            <template v-if="visibleEntry">
+              <p class="section-label"><span>{{ visibleEntry.label }}</span><span>JSON</span></p>
+              <pre><code>{{ JSON.stringify(visibleEntry.body, null, 2) }}</code></pre>
+            </template>
+            <div v-else class="empty"><strong>Waiting for a request</strong><p>Send the selected request to see its response.<template v-if="entries.length"> Previous responses remain in History.</template></p></div>
+          </div>
+          <div v-else>
+            <p v-if="!entries.length" class="empty">No responses in this session yet.</p>
+            <button v-for="(entry, index) in entries" :key="index" type="button" class="row-button" :aria-pressed="activeEntry === index" @click="activeEntry = index; responseTab = 'body'">
+              <span class="meta" :class="entry.status >= 400 ? 'status-bad' : 'status-ok'">{{ entry.status }}</span>
+              <strong class="row-copy">{{ entry.label }}</strong>
+              <time class="muted">{{ entry.time }}</time>
+            </button>
+          </div>
+        </article>
+      </main>
+    </div>
   </div>
 </template>

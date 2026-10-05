@@ -3,10 +3,19 @@
   "version": "0.1.0",
   "description": "A small self-hosted human approval gateway",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/ahmetomerv/JaGate.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ahmetomerv/JaGate.git"
+  },
   "homepage": "https://ahmetomerv.github.io/JaGate/",
   "bugs": "https://github.com/ahmetomerv/JaGate/issues",
-  "keywords": ["approval", "gateway", "telegram", "human-in-the-loop", "self-hosted"],
+  "keywords": [
+    "approval",
+    "gateway",
+    "telegram",
+    "human-in-the-loop",
+    "self-hosted"
+  ],
   "type": "module",
   "engines": {
     "node": ">=24.21.0 <25"
@@ -49,6 +58,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@picocss/pico": "^2.1.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.0.0",
     "@vitejs/plugin-vue": "5.2.4",

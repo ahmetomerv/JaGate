@@ -1,6 +1,6 @@
 # Local playground
 
-The playground is a development-only Vue interface for exercising JaGate's HTTP API and approval lifecycle. It runs on your computer at `http://127.0.0.1:5173`. Its small backend listens on `127.0.0.1:3081`, keeps client keys server-side, and sends API responses to the interface. Neither server is part of the production gateway build or Docker image.
+The playground is a development-only Vue and Pico CSS interface for exercising JaGate's HTTP API and approval lifecycle. It runs on your computer at `http://127.0.0.1:5173`. Its small backend listens on `127.0.0.1:3081`, keeps client keys server-side, and sends API responses to the interface. Neither server is part of the production gateway build or Docker image.
 
 ## Start it
 
