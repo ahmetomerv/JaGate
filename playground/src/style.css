@@ -182,6 +182,10 @@ p {
   gap: 0.5rem 0.75rem;
 }
 
+.editor-bar {
+  margin-top: 1rem;
+}
+
 .inbox-head {
   justify-content: space-between;
   margin-bottom: 0.75rem;
@@ -275,6 +279,12 @@ p {
 .api-panel {
   max-width: 46rem;
   margin-bottom: 1.75rem;
+}
+
+.api-panel {
+  border: 1px solid #5c5c5c;
+  border-radius: 6px;
+  background: #1c1c1c;
 }
 
 .workspace h1 {
@@ -679,7 +689,71 @@ label textarea {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 6px;
   cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.api-panel summary::-webkit-details-marker,
+.api-panel summary::marker {
+  content: '';
+  display: none;
+}
+
+.api-panel summary:hover,
+.api-panel summary:focus-visible {
+  background: #242424;
+}
+
+.api-panel summary .summary-label,
+.api-panel summary .summary-aside {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.api-panel summary .summary-label::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid var(--text);
+  border-bottom: 2px solid var(--text);
+  transform: translateY(-0.1rem) rotate(-45deg);
+}
+
+.api-panel[open] summary .summary-label::before {
+  transform: translateY(0.1rem) rotate(45deg);
+}
+
+.api-panel summary .disclosure {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.api-panel .when-open {
+  display: none;
+}
+
+.api-panel[open] .when-closed {
+  display: none;
+}
+
+.api-panel[open] .when-open {
+  display: inline;
+}
+
+.api-panel[open] summary {
+  border-bottom: 1px solid #3a3a3a;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.api-panel[open] > :not(summary) {
+  padding-right: 0.9rem;
+  padding-bottom: 0.9rem;
+  padding-left: 0.9rem;
 }
 
 .status-ok { color: #3dd68c; }

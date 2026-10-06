@@ -1031,8 +1031,11 @@ onUnmounted(() => {
 
         <details v-if="visibleEntry || entries.length" class="api-panel">
           <summary>
-            <span>API response</span>
-            <strong v-if="visibleEntry" :class="visibleEntry.status >= 400 ? 'status-bad' : 'status-ok'">HTTP {{ visibleEntry.status }}</strong>
+            <span class="summary-label">API response</span>
+            <span class="summary-aside">
+              <strong v-if="visibleEntry" :class="visibleEntry.status >= 400 ? 'status-bad' : 'status-ok'">HTTP {{ visibleEntry.status }}</strong>
+              <span class="disclosure"><span class="when-closed">Show</span><span class="when-open">Hide</span></span>
+            </span>
           </summary>
           <div class="editor-bar">
             <div class="tabs" role="tablist" aria-label="Response view">
