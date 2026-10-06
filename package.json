@@ -58,7 +58,6 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@picocss/pico": "^2.1.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.0.0",
     "@vitejs/plugin-vue": "5.2.4",

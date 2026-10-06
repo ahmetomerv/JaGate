@@ -2,31 +2,41 @@
 import { computed, onMounted, ref, watch } from 'vue';
 
 type Mode = 'simulated' | 'live';
+type View = 'approval' | 'list' | 'keys' | 'gateway';
 type Operation = 'create' | 'list' | 'get' | 'events' | 'cancel' | 'claim' | 'result' | 'keyCreate' | 'keyList' | 'keyRevoke' | 'audit' | 'health' | 'ready';
 type ClientKeyScope = 'requests:create' | 'requests:read' | 'requests:cancel' | 'requests:claim' | 'requests:result';
 type ClientKeyView = { id: string; clientId: string; label: string; scopes: ClientKeyScope[]; createdAt: string; expiresAt: string | null; revokedAt: string | null };
 type KeyPage = { items: ClientKeyView[]; nextCursor: string | null };
 type AuditEvent = { id: number; type: string; occurredAt: string; actor: 'bootstrap' | 'issued_key'; actorKeyId: string | null; requestId: string | null; subjectKeyId: string | null };
 type AuditPage = { items: AuditEvent[]; nextCursor: string | null };
+type Detail = { label: string; value: string };
 type RequestView = {
-  id: string; clientId: string; title: string; action: string; status: string; executionStatus: string;
-  deliveryStatus: string; deliveryAttempts: number; createdAt: string; expiresAt: string; claimedAt: string | null; resultSummary: string | null;
+  id: string; clientId: string; title: string; action: string; description?: string; details?: Detail[];
+  status: string; executionStatus: string; deliveryStatus: string; deliveryAttempts: number; deliveryError?: string | null;
+  createdAt: string; expiresAt: string; claimedAt: string | null; resultSummary: string | null; resultAt?: string | null;
 };
 type ListPage = { items: RequestView[]; nextCursor: string | null };
 type RequestEvent = { sequence: number; type: string; occurredAt: string; actorId: string | null; attempt: number | null };
 type EventPage = { items: RequestEvent[]; nextCursor: string | null };
 type Entry = { time: string; label: string; status: number; body: unknown };
-type ExampleRequest = { idempotencyKey: string; action: string; title: string; description: string;
-  details: Array<{ label: string; value: string }>; metadata: Record<string, unknown>; expiresInSeconds: number };
+type ExampleRequest = { idempotencyKey: string; action: string; title: string; description: string; details: Detail[]; metadata: Record<string, unknown>; expiresInSeconds: number };
 type SimulatedExample = { label: string; scenario: string; request: ExampleRequest };
 type Bootstrap = { token: string; simulatedClients: string[]; simulatedExamples: Record<string, SimulatedExample>;
-  liveClients: string[]; gatewayUrl: string; simulatedNow: string };
+  liveClients: string[]; gatewayUrl: string; simulatedNow: string; failNextDelivery?: boolean };
+type Executed = { status: number; body: Record<string, unknown> };
+
 const defaultRequest: ExampleRequest = { idempotencyKey: 'playground:local-test', action: 'test-action',
   title: 'Test a local approval', description: 'A harmless request made from the JaGate playground.',
   details: [{ label: 'Environment', value: 'local' }], metadata: { source: 'playground' }, expiresInSeconds: 900 };
+const availableKeyScopes: ClientKeyScope[] = ['requests:create', 'requests:read', 'requests:cancel', 'requests:claim', 'requests:result'];
+const scopeLabels: Record<ClientKeyScope, string> = {
+  'requests:create': 'Ask for approval', 'requests:read': 'Read requests', 'requests:cancel': 'Cancel a request',
+  'requests:claim': 'Claim an approval', 'requests:result': 'Report a result',
+};
 
 const bootstrap = ref<Bootstrap | null>(null);
 const mode = ref<Mode>('simulated');
+const view = ref<View>('approval');
 const clientId = ref('');
 const auth = ref<'valid' | 'scoped' | 'missing' | 'invalid'>('valid');
 const scopedKey = ref('');
@@ -35,7 +45,6 @@ const keyId = ref('');
 const keyLabel = ref('Local worker');
 const keyExpiresAt = ref('');
 const keyScopes = ref<ClientKeyScope[]>(['requests:create', 'requests:read']);
-const availableKeyScopes: ClientKeyScope[] = ['requests:create', 'requests:read', 'requests:cancel', 'requests:claim', 'requests:result'];
 const keyPage = ref<KeyPage | null>(null);
 const keyLimit = ref(20);
 const keyCursor = ref('');
@@ -56,6 +65,7 @@ const listClaimedBefore = ref('');
 const listExpiresBefore = ref('');
 const attentionMinutes = ref(10);
 const simulatedClockOffset = ref(0);
+const failNextDelivery = ref(false);
 const listLimit = ref(20);
 const listCursor = ref('');
 const listCursorStack = ref<string[]>([]);
@@ -66,49 +76,41 @@ const eventCursorStack = ref<string[]>([]);
 const entries = ref<Entry[]>([]);
 const busy = ref(false);
 const error = ref('');
-const key = ref(defaultRequest.idempotencyKey);
+const idempotencyKey = ref(defaultRequest.idempotencyKey);
 const action = ref(defaultRequest.action);
 const title = ref(defaultRequest.title);
 const description = ref(defaultRequest.description);
 const expiresInSeconds = ref(defaultRequest.expiresInSeconds);
-const detailsText = ref(JSON.stringify(defaultRequest.details));
-const metadataText = ref(JSON.stringify(defaultRequest.metadata));
+const detailRows = ref<Detail[]>(defaultRequest.details.map((item) => ({ ...item })));
+const metadataText = ref(JSON.stringify(defaultRequest.metadata, null, 2));
 const actor = ref<'allowed' | 'outsider'>('allowed');
 const advanceSeconds = ref(61);
 const claimToken = ref('');
 const showClaimToken = ref(false);
-const resultStatus = ref<'succeeded' | 'failed'>('succeeded');
-const resultSummary = ref('Local test completed');
-const operation = ref<Operation>('create');
-const requestTab = ref<'body' | 'preview'>('body');
-const responseTab = ref<'body' | 'history'>('body');
+const resultSummary = ref('Completed in the calling application');
+const composing = ref(true);
+const storyLoading = ref(false);
+const unavailable = ref(false);
+const blocked = ref(false);
+const createNotice = ref('');
+const telegramReply = ref('');
 const activeEntry = ref<number | null>(null);
 const copied = ref(false);
-
-const endpoints: Array<{ operation: Operation; method: 'GET' | 'POST'; label: string; path: string }> = [
-  { operation: 'create', method: 'POST', label: 'Create request', path: '/v1/requests' },
-  { operation: 'list', method: 'GET', label: 'List requests', path: '/v1/requests' },
-  { operation: 'get', method: 'GET', label: 'Get request', path: '/v1/requests/:id' },
-  { operation: 'events', method: 'GET', label: 'Request timeline', path: '/v1/requests/:id/events' },
-  { operation: 'cancel', method: 'POST', label: 'Cancel request', path: '/v1/requests/:id/cancel' },
-  { operation: 'claim', method: 'POST', label: 'Claim approval', path: '/v1/requests/:id/claim' },
-  { operation: 'result', method: 'POST', label: 'Report result', path: '/v1/requests/:id/result' },
-  { operation: 'keyCreate', method: 'POST', label: 'Create client key', path: '/v1/client-keys' },
-  { operation: 'keyList', method: 'GET', label: 'List client keys', path: '/v1/client-keys' },
-  { operation: 'keyRevoke', method: 'POST', label: 'Revoke client key', path: '/v1/client-keys/:id/revoke' },
-  { operation: 'audit', method: 'GET', label: 'Audit events', path: '/v1/audit-events' },
-  { operation: 'health', method: 'GET', label: 'Health', path: '/health' },
-  { operation: 'ready', method: 'GET', label: 'Readiness', path: '/ready' },
-];
-const requestEndpoints = endpoints.filter((item) => !item.operation.startsWith('key') && !['health', 'ready', 'audit'].includes(item.operation));
-const keyEndpoints = endpoints.filter((item) => item.operation.startsWith('key') || item.operation === 'audit');
-const utilityEndpoints = endpoints.filter((item) => ['health', 'ready'].includes(item.operation));
+const responseTab = ref<'body' | 'history'>('body');
+let openTicket = 0;
 
 const clients = computed(() => mode.value === 'simulated' ? bootstrap.value?.simulatedClients ?? [] : bootstrap.value?.liveClients ?? []);
 const simulatedExample = computed(() => mode.value === 'simulated' ? bootstrap.value?.simulatedExamples[clientId.value] : undefined);
 const selected = computed(() => [...history.value, ...(listPage.value?.items ?? [])].find((item) => item.id === requestId.value));
 const visibleEntry = computed(() => activeEntry.value === null ? undefined : entries.value[activeEntry.value]);
-const endpoint = computed(() => endpoints.find((item) => item.operation === operation.value)!);
+const clientOptions = computed(() => clients.value.map((id) => ({ value: id, label: mode.value === 'simulated' ? bootstrap.value?.simulatedExamples[id]?.label ?? id : id })));
+const simulatedNowLabel = computed(() => new Date(Date.now() + simulatedClockOffset.value).toLocaleString());
+const phase = computed(() => {
+  const item = selected.value;
+  if (!item || item.status === 'pending') return 'decide';
+  if (item.status === 'approved' && (item.executionStatus === 'unclaimed' || item.executionStatus === 'claimed')) return 'act';
+  return 'record';
+});
 const listFilters = computed(() => ({
   ...(listStatus.value ? { status: listStatus.value } : {}),
   ...(listDeliveryStatus.value ? { deliveryStatus: listDeliveryStatus.value } : {}),
@@ -122,62 +124,35 @@ const eventFilters = computed(() => ({ limit: Number(eventLimit.value), ...(even
 const keyFilters = computed(() => ({ limit: Number(keyLimit.value), ...(keyCursor.value ? { cursor: keyCursor.value } : {}) }));
 const auditFilters = computed(() => ({ limit: Number(auditLimit.value), ...(auditRequestId.value ? { requestId: auditRequestId.value } : {}),
   ...(auditKeyId.value ? { keyId: auditKeyId.value } : {}), ...(auditCursor.value ? { cursor: auditCursor.value } : {}) }));
-const requestPath = computed(() => {
-  const path = endpoint.value.path.replace(':id', operation.value === 'keyRevoke' ? keyId.value || ':id' : requestId.value || ':id');
-  const query = operation.value === 'list' ? listFilters.value : operation.value === 'events' ? eventFilters.value : operation.value === 'keyList' ? keyFilters.value : operation.value === 'audit' ? auditFilters.value : null;
-  return query ? `${path}?${new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)])).toString()}` : path;
-});
-const needsRequestId = computed(() => ['get', 'events', 'cancel', 'claim', 'result'].includes(operation.value));
-const needsKeyId = computed(() => operation.value === 'keyRevoke');
-const requestTabLabel = computed(() => needsRequestId.value || needsKeyId.value ? 'Params & body' : ['create', 'keyCreate'].includes(operation.value) ? 'Body' : ['list', 'keyList', 'audit'].includes(operation.value) ? 'Filters' : 'Overview');
-const authSummary = computed(() => auth.value === 'valid' ? 'Bootstrap key' : auth.value === 'scoped' ? 'Issued key' : auth.value === 'missing' ? 'None' : 'Invalid key');
-const clientOptions = computed(() => clients.value.map((id) => ({ value: id, label: mode.value === 'simulated' ? bootstrap.value?.simulatedExamples[id]?.label ?? id : id })));
-const previewBody = computed(() => operation.value === 'create' ? {
-  idempotencyKey: key.value, action: action.value, title: title.value, description: description.value,
-  details: parsePreview(detailsText.value), metadata: parsePreview(metadataText.value), expiresInSeconds: Number(expiresInSeconds.value),
-} : operation.value === 'result' ? {
-  claimToken: claimToken.value, status: resultStatus.value, summary: resultSummary.value,
-} : operation.value === 'keyCreate' ? { label: keyLabel.value, scopes: keyScopes.value }
-  : operation.value === 'list' ? listFilters.value : operation.value === 'events' ? eventFilters.value : operation.value === 'keyList' ? keyFilters.value : operation.value === 'audit' ? auditFilters.value : {});
+const requestPreview = computed(() => ({
+  idempotencyKey: idempotencyKey.value, action: action.value, title: title.value, description: description.value,
+  details: cleanDetails(), metadata: parsePreview(metadataText.value), expiresInSeconds: Number(expiresInSeconds.value),
+}));
 
 watch([listStatus, listDeliveryStatus, listExecutionStatus, listClaimedBefore, listExpiresBefore, listLimit, clientId, mode], () => {
   listCursor.value = '';
   listCursorStack.value = [];
   listPage.value = null;
 });
-
-function applyAttention(kind: 'all' | 'delivery' | 'claimed' | 'expiry') {
-  const minutes = Number(attentionMinutes.value);
-  if (kind !== 'all' && kind !== 'delivery' && (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)) {
-    error.value = 'Choose a window from 1 to 1440 minutes.';
-    return;
-  }
-  error.value = '';
-  const now = Date.now() + (mode.value === 'simulated' ? simulatedClockOffset.value : 0);
-  listStatus.value = kind === 'delivery' || kind === 'expiry' ? 'pending' : kind === 'claimed' ? 'approved' : '';
-  listDeliveryStatus.value = kind === 'delivery' ? 'failed' : '';
-  listExecutionStatus.value = kind === 'claimed' ? 'claimed' : '';
-  listClaimedBefore.value = kind === 'claimed' ? new Date(now - minutes * 60_000).toISOString() : '';
-  listExpiresBefore.value = kind === 'expiry' ? new Date(now + minutes * 60_000).toISOString() : '';
-}
-function setKeyExpiryOneHour() {
-  keyExpiresAt.value = new Date(Date.now() + (mode.value === 'simulated' ? simulatedClockOffset.value : 0) + 3_600_000).toISOString();
-}
 watch([clientId, mode], () => {
   clearDisplayedResponse();
   error.value = '';
+  createNotice.value = '';
+  telegramReply.value = '';
+  claimToken.value = '';
+  unavailable.value = false;
+  blocked.value = false;
   history.value = [];
-  const example = simulatedExample.value?.request ?? defaultRequest;
-  key.value = example.idempotencyKey;
-  action.value = example.action;
-  title.value = example.title;
-  description.value = example.description;
-  expiresInSeconds.value = example.expiresInSeconds;
-  detailsText.value = JSON.stringify(example.details);
-  metadataText.value = JSON.stringify(example.metadata);
-  void refreshHistory();
+  scopedKey.value = '';
+  keyId.value = '';
+  auth.value = 'valid';
+  applyExample(simulatedExample.value?.request ?? defaultRequest);
+  const openId = requestId.value;
+  const keepOpen = !composing.value && openId.length > 0;
+  if (keepOpen) storyLoading.value = true;
+  void refreshHistory().then(() => { if (keepOpen && requestId.value === openId && !composing.value) void openCurrent(); });
 });
-watch([requestId, clientId, mode, eventLimit], () => {
+watch([requestId, clientId, mode], () => {
   eventPage.value = null;
   eventCursor.value = '';
   eventCursorStack.value = [];
@@ -192,53 +167,90 @@ watch([clientId, mode, auditLimit, auditRequestId, auditKeyId], () => {
   auditCursor.value = '';
   auditCursorStack.value = [];
 });
-watch([clientId, mode], () => {
-  scopedKey.value = '';
-  keyId.value = '';
-  auth.value = 'valid';
-});
 
+function applyExample(example: ExampleRequest) {
+  idempotencyKey.value = example.idempotencyKey;
+  action.value = example.action;
+  title.value = example.title;
+  description.value = example.description;
+  expiresInSeconds.value = example.expiresInSeconds;
+  detailRows.value = example.details.map((item) => ({ ...item }));
+  metadataText.value = JSON.stringify(example.metadata, null, 2);
+}
+function cleanDetails(): Detail[] {
+  return detailRows.value.filter((row) => row.label.trim() || row.value.trim()).map((row) => ({ label: row.label.trim(), value: row.value.trim() }));
+}
+function addDetail() {
+  if (detailRows.value.length >= 10) return;
+  detailRows.value.push({ label: '', value: '' });
+}
+function removeDetail(index: number) { detailRows.value.splice(index, 1); }
 function parsePreview(value: string) {
   try { return JSON.parse(value) as unknown; } catch { return value; }
 }
-
 function clearDisplayedResponse() {
   activeEntry.value = null;
   responseTab.value = 'body';
   copied.value = false;
 }
-
-function selectOperation(next: Operation) {
-  if (next !== operation.value) {
-    clearDisplayedResponse();
-    eventPage.value = null;
-    eventCursor.value = '';
-    eventCursorStack.value = [];
-    keyPage.value = null;
-    keyCursor.value = '';
-    keyCursorStack.value = [];
-    auditPage.value = null;
-    auditCursor.value = '';
-    auditCursorStack.value = [];
+function applyAttention(kind: 'all' | 'delivery' | 'claimed' | 'expiry') {
+  const minutes = Number(attentionMinutes.value);
+  if (kind !== 'all' && kind !== 'delivery' && (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)) {
+    error.value = 'Choose a window from 1 to 1440 minutes.';
+    return;
   }
-  operation.value = next;
-  requestTab.value = 'body';
   error.value = '';
+  const now = Date.now() + (mode.value === 'simulated' ? simulatedClockOffset.value : 0);
+  listStatus.value = kind === 'delivery' || kind === 'expiry' ? 'pending' : kind === 'claimed' ? 'approved' : '';
+  listDeliveryStatus.value = kind === 'delivery' ? 'failed' : '';
+  listExecutionStatus.value = kind === 'claimed' ? 'claimed' : '';
+  listClaimedBefore.value = kind === 'claimed' ? new Date(now - minutes * 60_000).toISOString() : '';
+  listExpiresBefore.value = kind === 'expiry' ? new Date(now + minutes * 60_000).toISOString() : '';
+  listCursor.value = '';
+  listCursorStack.value = [];
+  void execute('list');
 }
-
-function selectRequest(item: RequestView) {
-  if (requestId.value !== item.id) {
-    claimToken.value = '';
-    clearDisplayedResponse();
-  }
-  requestId.value = item.id;
-  selectOperation('get');
+async function showRequests() {
+  listCursor.value = '';
+  listCursorStack.value = [];
+  await execute('list');
 }
-
+function setKeyExpiryOneHour() {
+  keyExpiresAt.value = new Date(Date.now() + (mode.value === 'simulated' ? simulatedClockOffset.value : 0) + 3_600_000).toISOString();
+}
+function newApproval() {
+  composing.value = true;
+  storyLoading.value = false;
+  requestId.value = '';
+  unavailable.value = false;
+  blocked.value = false;
+  createNotice.value = '';
+  telegramReply.value = '';
+  claimToken.value = '';
+  view.value = 'approval';
+  idempotencyKey.value = `playground:${Date.now()}`;
+}
+function stageClass(name: 'decide' | 'act' | 'record') {
+  const order = ['decide', 'act', 'record'];
+  const current = phase.value === 'decide' ? 'decide' : phase.value === 'act' ? 'act' : 'record';
+  const place = order.indexOf(name);
+  const here = order.indexOf(current);
+  if (place < here) return 'done';
+  if (place === here) return 'current';
+  return 'upcoming';
+}
 function remember(item: RequestView) {
   history.value = [item, ...history.value.filter((existing) => existing.id !== item.id)].slice(0, 100);
 }
-
+function gatewayMessage(body: unknown, status: number) {
+  if (body && typeof body === 'object' && 'error' in body) {
+    const cause = (body as { error: unknown }).error;
+    if (typeof cause === 'string') return cause;
+    if (cause && typeof cause === 'object' && 'message' in cause && typeof (cause as { message: unknown }).message === 'string')
+      return (cause as { message: string }).message;
+  }
+  return `The gateway returned HTTP ${status}.`;
+}
 async function api(path: string, body?: unknown) {
   const response = await fetch(path, {
     method: body === undefined ? 'GET' : 'POST',
@@ -249,7 +261,6 @@ async function api(path: string, body?: unknown) {
   if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : `Playground error ${response.status}`);
   return data;
 }
-
 function record(label: string, status: number, body: unknown, show = true) {
   entries.value = [{ time: new Date().toLocaleTimeString(), label, status, body }, ...entries.value].slice(0, 20);
   if (show) {
@@ -260,14 +271,12 @@ function record(label: string, status: number, body: unknown, show = true) {
     activeEntry.value = activeEntry.value + 1 < entries.value.length ? activeEntry.value + 1 : null;
   }
 }
-
 async function copyResponse() {
   if (!visibleEntry.value) return;
   await navigator.clipboard.writeText(JSON.stringify(visibleEntry.value.body, null, 2));
   copied.value = true;
   window.setTimeout(() => { copied.value = false; }, 1800);
 }
-
 async function refreshHistory() {
   if (!bootstrap.value || !clientId.value) { history.value = []; return; }
   const currentMode = mode.value;
@@ -277,37 +286,43 @@ async function refreshHistory() {
     if (currentMode === mode.value && currentClient === clientId.value) history.value = response.status === 200 ? response.body.items : [];
   } catch { if (currentMode === mode.value && currentClient === clientId.value) history.value = []; }
 }
-
 function changeMode(next: Mode) {
-  mode.value = next;
-  clientId.value = clients.value[0] ?? '';
   requestId.value = '';
+  composing.value = true;
   claimToken.value = '';
   scopedKey.value = '';
   error.value = '';
+  mode.value = next;
+  clientId.value = clients.value[0] ?? '';
 }
-
 const modeSelection = computed({
   get: () => mode.value,
   set: (next: Mode) => changeMode(next),
 });
-
-async function execute(sentOperation: Operation) {
-  if (!bootstrap.value || busy.value) return;
+async function execute(sentOperation: Operation, options?: { show?: boolean }): Promise<Executed | null> {
+  if (!bootstrap.value || busy.value) return null;
   error.value = '';
   const sentMode = mode.value;
   const sentClient = clientId.value;
   const sentRequestId = requestId.value;
   const sentKeyId = keyId.value;
   let payload: unknown;
-  try {
-    if (sentOperation === 'create') payload = {
-      idempotencyKey: key.value, action: action.value, title: title.value, description: description.value,
-      details: JSON.parse(detailsText.value), metadata: JSON.parse(metadataText.value), expiresInSeconds: Number(expiresInSeconds.value),
+  if (sentOperation === 'create') {
+    let metadata: unknown;
+    try { metadata = JSON.parse(metadataText.value) as unknown; }
+    catch { error.value = 'Metadata must be a JSON object.'; return null; }
+    if (metadata === null || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      error.value = 'Metadata must be a JSON object.';
+      return null;
+    }
+    payload = {
+      idempotencyKey: idempotencyKey.value, action: action.value, title: title.value, description: description.value,
+      details: cleanDetails(), metadata, expiresInSeconds: Number(expiresInSeconds.value),
     };
-    if (sentOperation === 'result') payload = { claimToken: claimToken.value, status: resultStatus.value, summary: resultSummary.value };
-    if (sentOperation === 'keyCreate') payload = { label: keyLabel.value, scopes: keyScopes.value,
-      ...(keyExpiresAt.value ? { expiresAt: keyExpiresAt.value } : {}) };
+  }
+  if (sentOperation === 'keyCreate') payload = { label: keyLabel.value, scopes: keyScopes.value, ...(keyExpiresAt.value ? { expiresAt: keyExpiresAt.value } : {}) };
+  const show = options?.show !== false;
+  try {
     busy.value = true;
     const response = await api('/api/execute', {
       mode: sentMode, clientId: sentClient, operation: sentOperation, auth: auth.value,
@@ -317,10 +332,12 @@ async function execute(sentOperation: Operation) {
       ...(sentOperation === 'keyList' ? { keyPage: keyFilters.value } : {}), payload,
       ...(sentOperation === 'audit' ? { auditPage: auditFilters.value } : {}),
     }) as { status: number; body: Record<string, unknown> };
-    const current = sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value &&
-      (sentOperation !== 'events' || sentRequestId === requestId.value) && (sentOperation !== 'keyRevoke' || sentKeyId === keyId.value);
-    record(`${sentOperation.toUpperCase()} · ${sentClient} · ${sentMode}`, response.status, response.body, current);
-    if (!current) return;
+    const current = sentMode === mode.value && sentClient === clientId.value
+      && (!['get', 'events', 'cancel', 'claim', 'result'].includes(sentOperation) || sentRequestId === requestId.value)
+      && (sentOperation !== 'keyRevoke' || sentKeyId === keyId.value);
+    record(`${sentOperation.toUpperCase()} · ${sentClient} · ${sentMode}`, response.status, response.body, show && current);
+    if (!current) return null;
+    if (response.status >= 400) error.value = gatewayMessage(response.body, response.status);
     if (sentOperation === 'list') listPage.value = response.status === 200 ? response.body as unknown as ListPage : null;
     if (sentOperation === 'events') eventPage.value = response.status === 200 ? response.body as unknown as EventPage : null;
     if (sentOperation === 'keyList') keyPage.value = response.status === 200 ? response.body as unknown as KeyPage : null;
@@ -332,79 +349,175 @@ async function execute(sentOperation: Operation) {
       auditPage.value = null;
     }
     if (sentOperation === 'keyRevoke' && response.status === 200) { keyPage.value = null; auditPage.value = null; }
-    const view = sentOperation === 'claim' ? response.body.request : response.body;
-    if (['create', 'get', 'cancel', 'claim', 'result'].includes(sentOperation) && view && typeof view === 'object' && 'id' in view) {
-      const item = view as RequestView;
+    const viewBody = sentOperation === 'claim' ? response.body.request : response.body;
+    const armedDelivery = failNextDelivery.value && sentMode === 'simulated' && sentOperation === 'create' && response.status === 201;
+    if (armedDelivery) failNextDelivery.value = false;
+    if (['create', 'get', 'cancel', 'claim', 'result'].includes(sentOperation) && viewBody && typeof viewBody === 'object' && 'id' in viewBody) {
+      const item = viewBody as RequestView;
       if (requestId.value !== item.id && sentOperation !== 'claim') claimToken.value = '';
       remember(item);
       requestId.value = item.id;
+      if (sentOperation === 'create' && (response.status === 200 || response.status === 201)) {
+        composing.value = false;
+        unavailable.value = false;
+        blocked.value = false;
+        view.value = 'approval';
+        createNotice.value = response.status === 200
+          ? 'This idempotency key already exists for this client, so JaGate returned the original request.'
+          : '';
+      }
+      if (sentOperation === 'get') { unavailable.value = false; blocked.value = false; }
+    }
+    if (sentOperation === 'get' && response.status !== 200) {
+      unavailable.value = true;
+      blocked.value = response.status === 401 || response.status === 403;
     }
     if (sentOperation === 'claim' && typeof response.body.claimToken === 'string') claimToken.value = response.body.claimToken;
     if (['create', 'get', 'cancel', 'claim', 'result'].includes(sentOperation)) await refreshHistory();
+    return { status: response.status, body: response.body };
   } catch (cause) {
-    if (sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value)
+    if (sentMode === mode.value && sentClient === clientId.value)
       error.value = cause instanceof Error ? cause.message : 'Request failed';
-  }
-  finally { busy.value = false; }
+    return null;
+  } finally { busy.value = false; }
 }
-
+async function loadEvents() {
+  if (!requestId.value) return;
+  eventCursor.value = '';
+  eventCursorStack.value = [];
+  await execute('events', { show: false });
+}
+function reloadEvents() {
+  if (requestId.value && !composing.value) void loadEvents();
+}
+async function openCurrent() {
+  const ticket = ++openTicket;
+  const id = requestId.value;
+  const known = selected.value?.id === id;
+  if (!known) storyLoading.value = true;
+  while (busy.value && ticket === openTicket) await new Promise((resolve) => setTimeout(resolve, 20));
+  if (ticket !== openTicket || requestId.value !== id) return;
+  const result = await execute('get', { show: false });
+  if (ticket !== openTicket || requestId.value !== id) return;
+  storyLoading.value = false;
+  if (result?.status === 200) await loadEvents();
+}
+async function openRequest(item: RequestView) {
+  if (requestId.value !== item.id) claimToken.value = '';
+  requestId.value = item.id;
+  composing.value = false;
+  unavailable.value = false;
+  createNotice.value = '';
+  telegramReply.value = '';
+  view.value = 'approval';
+  await openCurrent();
+}
+async function ask() {
+  telegramReply.value = '';
+  await execute('create');
+  if (!composing.value && requestId.value) await loadEvents();
+}
+async function cancelRequest() {
+  telegramReply.value = '';
+  await execute('cancel');
+  await loadEvents();
+}
+async function claimApproval() {
+  await execute('claim');
+  await loadEvents();
+}
+async function report(status: 'succeeded' | 'failed') {
+  if (!bootstrap.value || busy.value) return;
+  const sentMode = mode.value;
+  const sentClient = clientId.value;
+  const sentRequestId = requestId.value;
+  try {
+    busy.value = true;
+    error.value = '';
+    const response = await api('/api/execute', {
+      mode: sentMode, clientId: sentClient, operation: 'result', auth: auth.value,
+      ...(auth.value === 'scoped' ? { scopedKey: scopedKey.value } : {}), requestId: sentRequestId,
+      payload: { claimToken: claimToken.value, status, summary: resultSummary.value },
+    }) as { status: number; body: Record<string, unknown> };
+    const current = sentMode === mode.value && sentClient === clientId.value && sentRequestId === requestId.value;
+    record(`RESULT · ${sentClient} · ${sentMode}`, response.status, response.body, current);
+    if (!current) return;
+    if (response.status >= 400) error.value = gatewayMessage(response.body, response.status);
+    if (response.body && typeof response.body === 'object' && 'id' in response.body) {
+      remember(response.body as RequestView);
+      requestId.value = String(response.body.id);
+    }
+    await refreshHistory();
+  } catch (cause) {
+    if (sentMode === mode.value && sentClient === clientId.value && sentRequestId === requestId.value)
+      error.value = cause instanceof Error ? cause.message : 'Request failed';
+  } finally { busy.value = false; }
+  await loadEvents();
+}
 async function nextPage() {
   if (!listPage.value?.nextCursor || busy.value) return;
   listCursorStack.value.push(listCursor.value);
   listCursor.value = listPage.value.nextCursor;
   await execute('list');
 }
-
 async function previousPage() {
   if (!listCursorStack.value.length || busy.value) return;
   listCursor.value = listCursorStack.value.pop()!;
   await execute('list');
 }
-
 async function nextEventPage() {
   if (!eventPage.value?.nextCursor || busy.value) return;
   eventCursorStack.value.push(eventCursor.value);
   eventCursor.value = eventPage.value.nextCursor;
   await execute('events');
 }
-
 async function previousEventPage() {
   if (!eventCursorStack.value.length || busy.value) return;
   eventCursor.value = eventCursorStack.value.pop()!;
   await execute('events');
 }
-
+async function showKeys() {
+  keyCursor.value = '';
+  keyCursorStack.value = [];
+  await execute('keyList');
+}
 async function nextKeyPage() {
   if (!keyPage.value?.nextCursor || busy.value) return;
   keyCursorStack.value.push(keyCursor.value);
   keyCursor.value = keyPage.value.nextCursor;
   await execute('keyList');
 }
-
 async function previousKeyPage() {
   if (!keyCursorStack.value.length || busy.value) return;
   keyCursor.value = keyCursorStack.value.pop()!;
   await execute('keyList');
 }
-
+async function issueKey() {
+  const result = await execute('keyCreate');
+  if (result?.status === 201) await execute('keyList', { show: false });
+}
+async function revokeKey(id: string) {
+  keyId.value = id;
+  const result = await execute('keyRevoke');
+  if (result?.status === 200) await execute('keyList', { show: false });
+}
+async function showAudit() {
+  auditCursor.value = '';
+  auditCursorStack.value = [];
+  await execute('audit');
+}
 async function nextAuditPage() {
   if (!auditPage.value?.nextCursor || busy.value) return;
   auditCursorStack.value.push(auditCursor.value);
   auditCursor.value = auditPage.value.nextCursor;
   await execute('audit');
 }
-
 async function previousAuditPage() {
   if (!auditCursorStack.value.length || busy.value) return;
   auditCursor.value = auditCursorStack.value.pop()!;
   await execute('audit');
 }
-
-function selectClientKey(item: ClientKeyView) {
-  keyId.value = item.id;
-  selectOperation('keyRevoke');
-}
-
+function useIssuedKey() { auth.value = 'scoped'; }
 function eventLabel(type: string): string {
   return ({
     'request.created': 'Request created',
@@ -412,56 +525,69 @@ function eventLabel(type: string): string {
     'delivery.delivered': 'Delivered to Telegram', 'delivery.requeued': 'Delivery requeued',
     'decision.approved': 'Approved', 'decision.rejected': 'Rejected',
     'decision.expired': 'Expired', 'decision.cancelled': 'Cancelled',
-    'execution.claimed': 'Execution claimed', 'execution.succeeded': 'Result reported: succeeded',
+    'execution.claimed': 'Claimed by the application', 'execution.succeeded': 'Application reported success',
+    'execution.failed': 'Application reported failure',
+  } as Record<string, string>)[type] ?? type;
+}
+function auditLabel(type: string): string {
+  return ({
+    'key.issued': 'Key issued', 'key.revoked': 'Key revoked', 'request.created': 'Request created',
+    'execution.claimed': 'Approval claimed', 'execution.succeeded': 'Result reported: succeeded',
     'execution.failed': 'Result reported: failed',
   } as Record<string, string>)[type] ?? type;
 }
-
 async function decide(decision: 'approve' | 'reject') {
   if (busy.value || !requestId.value) return;
   error.value = '';
   const sentMode = mode.value;
   const sentClient = clientId.value;
   const sentRequestId = requestId.value;
-  const sentOperation = operation.value;
   try {
     busy.value = true;
-    const response = await api('/api/decide', { requestId: sentRequestId, clientId: sentClient, decision, actor: actor.value }) as { message: string; request: RequestView };
-    const current = sentMode === mode.value && sentClient === clientId.value && sentRequestId === requestId.value && sentOperation === operation.value;
+    const response = await api('/api/decide', { requestId: sentRequestId, clientId: sentClient, decision, actor: actor.value }) as { message?: string; request: RequestView };
+    const current = sentMode === mode.value && sentClient === clientId.value && sentRequestId === requestId.value;
     record(`${decision.toUpperCase()} · ${sentClient} · ${sentMode}`, 200, response, current);
     if (!current) return;
-    remember(response.request);
-    eventPage.value = null;
+    telegramReply.value = response.message ?? '';
+    if (response.request) remember(response.request);
     await refreshHistory();
   } catch (cause) {
-    if (sentMode === mode.value && sentClient === clientId.value && sentRequestId === requestId.value && sentOperation === operation.value)
+    if (sentMode === mode.value && sentClient === clientId.value && sentRequestId === requestId.value)
       error.value = cause instanceof Error ? cause.message : 'Decision failed';
-  }
-  finally { busy.value = false; }
+  } finally { busy.value = false; }
+  await loadEvents();
 }
-
 async function advanceTime() {
   if (busy.value) return;
   error.value = '';
   const sentMode = mode.value;
   const sentClient = clientId.value;
-  const sentOperation = operation.value;
+  const openId = requestId.value;
   try {
     busy.value = true;
     const response = await api('/api/advance-time', { seconds: Number(advanceSeconds.value) });
     if (typeof (response as { now?: unknown }).now === 'string') simulatedClockOffset.value = Date.parse((response as { now: string }).now) - Date.now();
-    const current = sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value;
+    const current = sentMode === mode.value && sentClient === clientId.value;
     record(`ADVANCE CLOCK · ${sentClient} · ${sentMode}`, 200, response, current);
     if (!current) return;
-    eventPage.value = null;
     await refreshHistory();
   } catch (cause) {
-    if (sentMode === mode.value && sentClient === clientId.value && sentOperation === operation.value)
+    if (sentMode === mode.value && sentClient === clientId.value)
       error.value = cause instanceof Error ? cause.message : 'Clock change failed';
-  }
-  finally { busy.value = false; }
+  } finally { busy.value = false; }
+  if (openId && requestId.value === openId && !composing.value) await openCurrent();
 }
-
+async function armDeliveryFailure() {
+  if (busy.value || failNextDelivery.value) return;
+  error.value = '';
+  try {
+    busy.value = true;
+    const response = await api('/api/fail-next-delivery', {}) as { armed: boolean };
+    failNextDelivery.value = response.armed;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'Could not arm the delivery failure';
+  } finally { busy.value = false; }
+}
 function onScopeChange(scope: ClientKeyScope, event: Event) {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) return;
@@ -470,9 +596,10 @@ function onScopeChange(scope: ClientKeyScope, event: Event) {
     : keyScopes.value.filter((item) => item !== scope);
 }
 function statusClass(status: string) {
-  if (status === 'approved' || status === 'succeeded') return 'ok';
-  if (status === 'rejected' || status === 'failed' || status === 'cancelled') return 'bad';
-  if (status === 'pending') return 'wait';
+  if (status === 'approved' || status === 'succeeded' || status.includes('succeeded') || status.includes('approved') || status.includes('delivered')) return 'ok';
+  if (status === 'rejected' || status === 'failed' || status === 'cancelled' || status.includes('failed') || status.includes('rejected') || status.includes('cancelled')) return 'bad';
+  if (status === 'pending' || status.includes('retry')) return 'wait';
+  if (status === 'expired' || status.includes('expired')) return 'expired';
   return 'idle';
 }
 function keyState(item: ClientKeyView) {
@@ -480,6 +607,12 @@ function keyState(item: ClientKeyView) {
   const now = Date.now() + (mode.value === 'simulated' ? simulatedClockOffset.value : 0);
   if (item.expiresAt && Date.parse(item.expiresAt) <= now) return 'Expired';
   return 'Active';
+}
+function deliveryLine(item: RequestView) {
+  if (item.deliveryStatus === 'delivered') return 'Delivered to this client’s Telegram chat.';
+  if (item.deliveryStatus === 'failed') return item.deliveryError || 'Delivery failed, so a decision cannot be recorded yet.';
+  if (item.deliveryStatus === 'retrying') return 'Delivery is retrying.';
+  return 'Waiting for Telegram delivery.';
 }
 
 onMounted(async () => {
@@ -489,8 +622,8 @@ onMounted(async () => {
     bootstrap.value = await response.json() as Bootstrap;
     const simulatedNow = Date.parse(bootstrap.value.simulatedNow);
     simulatedClockOffset.value = Number.isFinite(simulatedNow) ? simulatedNow - Date.now() : 0;
+    failNextDelivery.value = bootstrap.value.failNextDelivery === true;
     clientId.value = bootstrap.value.simulatedClients[0] ?? '';
-    await refreshHistory();
   } catch (cause) { error.value = cause instanceof Error ? cause.message : 'Could not start the playground'; }
 });
 </script>
@@ -498,19 +631,16 @@ onMounted(async () => {
 <template>
   <div class="shell">
     <header class="chrome">
-    <div class="topbar">
-      <div class="brand">
-        <img src="/logo.svg" alt="" width="28" height="28" />
-        JaGate <span>Playground [local]</span>
+      <div class="topbar">
+        <div class="brand">
+          <img src="/logo.svg" alt="" width="28" height="28" />
+          JaGate <span>Playground</span>
+        </div>
+        <div class="top-links">
+          <a href="https://github.com/ahmetomerv/JaGate/blob/main/docs/guide/playground.md" target="_blank" rel="noreferrer">Usage guide</a>
+        </div>
       </div>
-      <div class="top-links">
-        <span class="hide-narrow">Approval API workbench</span>
-        <a href="https://github.com/ahmetomerv/JaGate/blob/main/docs/guide/playground.md" target="_blank" rel="noreferrer">Usage guide</a>
-      </div>
-    </div>
-
-    <div class="environment">
-      <div class="environment-group">
+      <div class="environment">
         <label class="environment-field">
           <span class="field-label">Environment <span class="mode-note">{{ mode === 'simulated' ? 'Local simulator · isolated database' : bootstrap?.gatewayUrl }}</span></span>
           <select v-model="modeSelection" aria-label="Environment">
@@ -518,317 +648,397 @@ onMounted(async () => {
             <option value="live">Real gateway</option>
           </select>
         </label>
-      </div>
-      <div class="environment-group">
-        <label>Client
+        <label>
+          Client
           <select v-model="clientId" :disabled="!clients.length" aria-label="Client">
             <option v-for="option in clientOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
           </select>
         </label>
-        <label>Auth
-          <select v-model="auth" aria-label="Authorization">
+        <label>
+          Calling as
+          <select v-model="auth" aria-label="Calling as">
             <option value="valid">Bootstrap key</option>
             <option value="scoped">Issued key</option>
             <option value="missing">Missing key</option>
             <option value="invalid">Invalid key</option>
           </select>
         </label>
-        <div v-if="auth === 'scoped'" class="inline-field">
+      </div>
+      <div v-if="auth === 'scoped'" class="issued-key">
+        <div class="inline-field">
           <label for="issued-key">Issued key</label>
           <input id="issued-key" v-model="scopedKey" :type="showScopedKey ? 'text' : 'password'" autocomplete="off" spellcheck="false" placeholder="Paste the key returned once" />
-          <button type="button" class="outline" :aria-label="showScopedKey ? 'Hide issued key' : 'Show issued key'" @click="showScopedKey = !showScopedKey">{{ showScopedKey ? 'Hide' : 'Show' }}</button>
+          <button type="button" :aria-label="showScopedKey ? 'Hide issued key' : 'Show issued key'" @click="showScopedKey = !showScopedKey">{{ showScopedKey ? 'Hide' : 'Show' }}</button>
         </div>
       </div>
-    </div>
-    <p v-if="error" class="notice" role="alert">{{ error }}</p>
-    <p v-if="mode === 'live' && !clients.length" class="notice warn">Live mode needs CLIENT_KEYS in your local .env and a running gateway.</p>
+      <nav class="view-nav" aria-label="Playground sections">
+        <button type="button" :aria-pressed="view === 'approval'" @click="view = 'approval'">This approval</button>
+        <button type="button" :aria-pressed="view === 'list'" @click="view = 'list'">All requests</button>
+        <button type="button" :aria-pressed="view === 'keys'" @click="view = 'keys'">Keys</button>
+        <button type="button" :aria-pressed="view === 'gateway'" @click="view = 'gateway'">Gateway</button>
+      </nav>
+      <p v-if="error" class="notice" role="alert">{{ error }}</p>
+      <p v-if="mode === 'live' && !clients.length" class="notice warn">Live mode needs CLIENT_KEYS in your local .env and a running gateway.</p>
     </header>
 
-    <div class="workbench">
-      <aside class="sidebar">
-        <section class="nav-block">
-          <div class="nav-heading"><span>Requests</span><span>{{ requestEndpoints.length }}</span></div>
-          <div class="nav-list">
-            <button v-for="item in requestEndpoints" :key="item.operation" type="button" :aria-pressed="operation === item.operation" @click="selectOperation(item.operation)">
-              <span class="method" :class="{ post: item.method === 'POST' }">{{ item.method }}</span>{{ item.label }}
-            </button>
-          </div>
-        </section>
-        <section class="nav-block">
-          <div class="nav-heading"><span>Client keys</span><span>{{ keyEndpoints.length }}</span></div>
-          <div class="nav-list">
-            <button v-for="item in keyEndpoints" :key="item.operation" type="button" :aria-pressed="operation === item.operation" @click="selectOperation(item.operation)">
-              <span class="method" :class="{ post: item.method === 'POST' }">{{ item.method }}</span>{{ item.label }}
-            </button>
-          </div>
-        </section>
-        <section class="nav-block">
-          <div class="nav-heading">Status</div>
-          <div class="nav-list">
-            <button v-for="item in utilityEndpoints" :key="item.operation" type="button" :aria-pressed="operation === item.operation" @click="selectOperation(item.operation)">
-              <span class="method">{{ item.method }}</span>{{ item.label }}
-            </button>
-          </div>
-        </section>
-        <section class="nav-block recent">
-          <div class="nav-heading">
-            <span>Recent · {{ clientId }}</span>
-            <button type="button" class="outline" title="Refresh recent requests" aria-label="Refresh recent requests" @click="refreshHistory">Refresh</button>
-          </div>
-          <p v-if="!history.length" class="hint">Create a request to see it here.</p>
-          <div class="nav-list">
-            <button v-for="item in history" :key="item.id" type="button" class="recent-item" :aria-pressed="requestId === item.id" @click="selectRequest(item)">
-              <span>{{ item.title }}</span>
-              <span class="recent-meta"><span>{{ item.clientId }} · {{ item.id.slice(0, 8) }}</span><span class="dot" :class="statusClass(item.status)"></span></span>
-            </button>
-          </div>
-        </section>
-        <div class="sidebar-foot"><span class="dot ok"></span>Development only<span class="meta">v0.1</span></div>
+    <div class="workbench" :class="{ 'with-inbox': view === 'approval' }">
+      <aside v-if="view === 'approval'" class="inbox">
+        <div class="inbox-head">
+          <span>This client</span>
+          <button type="button" :disabled="busy" @click="refreshHistory">Refresh</button>
+        </div>
+        <button type="button" class="new-approval" @click="newApproval">New approval</button>
+        <p v-if="!history.length" class="hint">Approvals for this client will show up here.</p>
+        <div class="inbox-list">
+          <button v-for="item in history" :key="item.id" type="button" :aria-pressed="requestId === item.id && !composing" @click="openRequest(item)">
+            <span class="inbox-title">{{ item.title }}</span>
+            <span class="inbox-meta"><span class="dot" :class="statusClass(item.status)"></span><span>{{ item.id.slice(0, 8) }}</span><span class="status-word">{{ item.status }}</span></span>
+          </button>
+        </div>
       </aside>
 
       <main class="workspace">
-        <p v-if="simulatedExample" class="context"><strong>{{ simulatedExample.label }}</strong> (<code>{{ clientId }}</code>) is a client: an application or automation that asks JaGate for approval before it can {{ simulatedExample.scenario }}. Each client has its own requests, keys, Telegram chat, and approver. Selecting another client loads its sample request.</p>
-        <article>
-          <header class="panel-head">
-            <h1>{{ endpoint.label }}</h1>
-          </header>
-          <div class="request-line">
-            <span class="method" :class="{ post: endpoint.method === 'POST' }">{{ endpoint.method }}</span>
-            <code>{{ mode === 'simulated' ? 'simulated://jagate' : bootstrap?.gatewayUrl }}{{ requestPath }}</code>
-            <button type="button" :aria-busy="busy" :disabled="busy || !clientId || (needsRequestId && !requestId) || (needsKeyId && !keyId) || (auth === 'scoped' && !scopedKey)" @click="execute(operation)">{{ busy ? 'Sending…' : 'Send' }}</button>
-          </div>
+        <p v-if="simulatedExample" class="intro"><strong>{{ simulatedExample.label }}</strong> asks JaGate before it can {{ simulatedExample.scenario }}. JaGate stores the request and the person’s decision. The application performs the action.</p>
+        <p v-else-if="clientId" class="intro">This client calls <code>{{ bootstrap?.gatewayUrl }}</code>. A person decides in its Telegram chat, then the application claims the approval and reports what it did.</p>
 
-          <div class="editor-bar">
-            <div class="tabs" role="tablist" aria-label="Request editor">
-              <button type="button" role="tab" :aria-selected="requestTab === 'body'" @click="requestTab = 'body'">{{ requestTabLabel }}</button>
-              <button type="button" role="tab" :aria-selected="requestTab === 'preview'" @click="requestTab = 'preview'">JSON preview</button>
+        <template v-if="view === 'approval'">
+          <section v-if="composing" class="card">
+            <h1>Ask for approval</h1>
+            <p class="lead">Describe the action the application wants a person to approve. The same text is what that person sees in Telegram.</p>
+            <div class="fields">
+              <label class="span-2">Title<input v-model="title" maxlength="100" /></label>
+              <label class="span-2">Description<textarea v-model="description" rows="3" maxlength="1000"></textarea></label>
+              <label>Action<input v-model="action" maxlength="64" spellcheck="false" /></label>
+              <label>Open for (seconds)<input v-model.number="expiresInSeconds" type="number" min="60" max="86400" /></label>
             </div>
-            <span class="muted">Authorization <strong>{{ authSummary }}</strong></span>
-          </div>
+            <div class="detail-block">
+              <div class="section-row"><h2>Details the approver sees</h2><button type="button" :disabled="detailRows.length >= 10" @click="addDetail">Add detail</button></div>
+              <div v-for="(row, index) in detailRows" :key="index" class="detail-row">
+                <label>Label<input v-model="row.label" maxlength="40" /></label>
+                <label>Value<input v-model="row.value" maxlength="160" /></label>
+                <button type="button" @click="removeDetail(index)">Remove</button>
+              </div>
+            </div>
+            <div class="fields">
+              <label>Idempotency key<input v-model="idempotencyKey" maxlength="128" spellcheck="false" /></label>
+              <div class="field-actions">
+                <button type="button" @click="idempotencyKey = 'playground:' + Date.now()">New key</button>
+                <p class="hint">Ask again with the same key and the same text to get the original request. Change the text and that key is rejected.</p>
+              </div>
+            </div>
+            <details class="extra">
+              <summary>Metadata, stored with the request and omitted from Telegram</summary>
+              <label>Metadata JSON<textarea v-model="metadataText" rows="3" spellcheck="false"></textarea></label>
+              <pre><code>{{ JSON.stringify(requestPreview, null, 2) }}</code></pre>
+            </details>
+            <div v-if="mode === 'simulated'" class="try-row">
+              <button type="button" :disabled="busy || failNextDelivery" @click="armDeliveryFailure">{{ failNextDelivery ? 'Next message will fail' : 'Make the next message fail' }}</button>
+              <p class="hint">The request is still saved. Telegram delivery is marked failed, so nobody can approve it until a message is delivered.</p>
+            </div>
+            <button type="button" :aria-busy="busy" :disabled="busy || !clientId || (auth === 'scoped' && !scopedKey)" @click="ask">{{ busy ? 'Asking…' : 'Ask for approval' }}</button>
+          </section>
 
-          <div v-if="requestTab === 'preview'">
-            <p class="section-label"><span>{{ operation === 'list' || operation === 'events' || operation === 'keyList' || operation === 'audit' ? 'Query parameters' : 'Request body' }}</span><span>Read only preview</span></p>
-            <pre><code>{{ JSON.stringify(previewBody, null, 2) }}</code></pre>
-            <p v-if="operation === 'create' || operation === 'result' || operation === 'keyCreate'" class="hint">Edit values in the {{ needsRequestId ? 'Params & body' : 'Body' }} tab.</p>
-            <p v-else-if="operation !== 'list' && operation !== 'events' && operation !== 'keyList' && operation !== 'audit'" class="hint">This endpoint does not require a request body.</p>
-          </div>
+          <section v-else-if="!selected && (storyLoading || !unavailable)" class="card"><p class="hint">Loading this approval…</p></section>
 
-          <div v-else>
-            <template v-if="operation === 'create'">
-              <p class="section-label"><span>Application / JSON</span><span>Approval payload</span></p>
-              <div class="fields">
-                <label>Idempotency key<input v-model="key" maxlength="128" /></label>
-                <label>Action<input v-model="action" maxlength="64" /></label>
-                <label class="span-2">Title<input v-model="title" maxlength="100" /></label>
-                <label class="span-2">Description<textarea v-model="description" rows="2" maxlength="1000"></textarea></label>
-                <label>Expires in seconds<input v-model.number="expiresInSeconds" type="number" min="60" max="86400" /></label>
-                <div>
-                  <button type="button" class="outline" @click="key = 'playground:' + Date.now()">Generate new key</button>
-                  <p class="hint">Reuse the key to test idempotency.</p>
+          <section v-else-if="unavailable || !selected" class="card">
+            <h1>{{ blocked ? 'This call was rejected' : 'This client cannot see that request' }}</h1>
+            <p v-if="blocked" class="lead">The credential in Calling as cannot read this approval. Health and readiness stay available under Gateway.</p>
+            <p v-else class="lead">Each client only reads the approvals it created. Switch back to the owning client, or start another approval.</p>
+            <button type="button" @click="newApproval">New approval</button>
+          </section>
+
+          <template v-else>
+            <section class="card story-head">
+              <div class="story-title">
+                <h1>{{ selected.title }}</h1>
+                <code>{{ selected.id.slice(0, 8) }}</code>
+              </div>
+              <p v-if="createNotice" class="hint">{{ createNotice }}</p>
+              <div class="facts">
+                <span><small>Decision</small>{{ selected.status }}</span>
+                <span><small>Delivery</small>{{ selected.deliveryStatus }}</span>
+                <span><small>Application</small>{{ selected.executionStatus }}</span>
+              </div>
+            </section>
+
+            <div class="stages">
+              <section class="stage done">
+                <div class="stage-rail"><span>1</span></div>
+                <div class="stage-body">
+                  <h2>The application asked</h2>
+                  <p>{{ selected.description }}</p>
+                  <dl v-if="selected.details?.length" class="details">
+                    <template v-for="detail in selected.details" :key="detail.label + detail.value">
+                      <dt>{{ detail.label }}</dt>
+                      <dd>{{ detail.value }}</dd>
+                    </template>
+                  </dl>
+                  <p class="hint">Action <code>{{ selected.action }}</code> · open until {{ new Date(selected.expiresAt).toLocaleString() }}</p>
+                  <button v-if="selected.status === 'pending'" type="button" :disabled="busy" @click="cancelRequest">Cancel this request</button>
                 </div>
-                <label class="span-2">Details <span class="muted">JSON array</span><textarea v-model="detailsText" rows="2" spellcheck="false"></textarea></label>
-                <label class="span-2">Metadata <span class="muted">JSON object</span><textarea v-model="metadataText" rows="2" spellcheck="false"></textarea></label>
-              </div>
-            </template>
-            <template v-else-if="operation === 'list'">
-              <p class="section-label"><span>Query parameters</span><span>Only the selected client's requests</span></p>
-              <div class="attention" role="group" aria-label="Requests needing attention">
-                <strong>Requests needing attention</strong>
-                <button type="button" class="outline" :disabled="busy" @click="applyAttention('delivery')">Failed delivery</button>
-                <button type="button" class="outline" :disabled="busy" @click="applyAttention('claimed')">Old claims</button>
-                <button type="button" class="outline" :disabled="busy" @click="applyAttention('expiry')">Expiring soon</button>
-                <button type="button" class="outline" :disabled="busy" @click="applyAttention('all')">Clear filters</button>
-                <label for="attention-window">Window (minutes)<input id="attention-window" v-model.number="attentionMinutes" type="number" min="1" max="1440" /></label>
-              </div>
-              <div class="fields">
-                <label>Decision status
-                  <select v-model="listStatus" aria-label="Decision status">
-                    <option value="">Any</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="expired">Expired</option><option value="cancelled">Cancelled</option>
-                  </select>
-                </label>
-                <label>Delivery status
-                  <select v-model="listDeliveryStatus" aria-label="Delivery status">
-                    <option value="">Any</option><option value="pending">Pending</option><option value="retrying">Retrying</option><option value="delivered">Delivered</option><option value="failed">Failed</option>
-                  </select>
-                </label>
-                <label>Execution status
-                  <select v-model="listExecutionStatus" aria-label="Execution status">
-                    <option value="">Any</option><option value="unclaimed">Unclaimed</option><option value="claimed">Claimed</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option>
-                  </select>
-                </label>
-                <label>Page size<input v-model.number="listLimit" type="number" min="1" max="100" /></label>
-                <label>Claimed before <span class="muted">UTC ISO 8601</span><input v-model.trim="listClaimedBefore" placeholder="2026-10-05T12:00:00.000Z" spellcheck="false" /></label>
-                <label>Expires before <span class="muted">UTC ISO 8601</span><input v-model.trim="listExpiresBefore" placeholder="2026-10-05T12:00:00.000Z" spellcheck="false" /></label>
-              </div>
-              <p class="hint">Shortcuts set fixed UTC cutoffs using the selected clock. Send to load a page; keep those cutoffs when paging. Old claims need reconciliation before any retry.</p>
-            </template>
-            <template v-else-if="operation === 'keyCreate'">
-              <p class="section-label"><span>Application / JSON</span><span>Bootstrap key required</span></p>
-              <div class="fields">
-                <label class="span-2">Key label<input v-model="keyLabel" maxlength="80" placeholder="Name the app or worker" /></label>
-                <label class="span-2">Expires at <span class="muted">optional UTC ISO 8601</span><input v-model.trim="keyExpiresAt" placeholder="2026-10-05T22:00:00.000Z" spellcheck="false" /></label>
-              </div>
-              <div class="actions">
-                <button type="button" class="outline" @click="setKeyExpiryOneHour">Set 1 hour from now</button>
-                <button type="button" class="outline" @click="keyExpiresAt = ''">No expiry</button>
-              </div>
-              <fieldset>
-                <legend>Allowed request operations</legend>
-                <div class="scopes">
-                  <label v-for="scope in availableKeyScopes" :key="scope"><input type="checkbox" :checked="keyScopes.includes(scope)" @change="onScopeChange(scope, $event)" />{{ scope }}</label>
-                </div>
-              </fieldset>
-              <p class="hint">The new key appears only in the creation response. An optional expiry blocks later requests at that time. It also fills the Issued key field for this browser session; copy it before leaving.</p>
-            </template>
-            <template v-else-if="operation === 'keyList'">
-              <p class="section-label"><span>Query parameters</span><span>Bootstrap key required</span></p>
-              <label>Page size<input v-model.number="keyLimit" type="number" min="1" max="100" /></label>
-              <p class="hint">Lists this client's issued keys, including revoked keys. Secret values are never returned here.</p>
-            </template>
-            <template v-else-if="operation === 'keyRevoke'">
-              <p class="section-label"><span>Path parameters</span><span>Bootstrap key required</span></p>
-              <label>Client key ID<input v-model="keyId" placeholder="Select a listed key or paste its UUID" spellcheck="false" /></label>
-              <p class="hint">Revocation takes effect on the next API request. The configured bootstrap key is rotated in .env, not here.</p>
-            </template>
-            <template v-else-if="operation === 'audit'">
-              <p class="section-label"><span>Query parameters</span><span>Bootstrap key required · selected client only</span></p>
-              <div class="fields">
-                <label>Page size<input v-model.number="auditLimit" type="number" min="1" max="100" /></label>
-                <label>Request ID <span class="muted">optional</span><input v-model.trim="auditRequestId" placeholder="Filter by request UUID" spellcheck="false" /></label>
-                <label class="span-2">Client key ID <span class="muted">optional</span><input v-model.trim="auditKeyId" placeholder="Actor or affected key UUID" spellcheck="false" /></label>
-              </div>
-              <p class="hint">Newest first. Records successful request creation, claims, results, key issuance, and revocation. Only key IDs are stored; secrets never appear here.</p>
-            </template>
-            <template v-else-if="needsRequestId">
-              <p class="section-label"><span>Path parameters</span><span>Required</span></p>
-              <label>Request ID<input v-model="requestId" placeholder="Select a recent request or paste its UUID" spellcheck="false" /></label>
-              <label v-if="operation === 'events'">Page size<input v-model.number="eventLimit" type="number" min="1" max="100" /></label>
-              <p v-if="operation === 'events'" class="hint">Oldest events first. Each event records a gateway state change; no action is executed here.</p>
-              <template v-if="operation === 'result'">
-                <p class="section-label"><span>Application / JSON</span><span>Execution result</span></p>
-                <div class="fields">
-                  <div class="span-2 inline-field">
-                    <label for="claim-token">Claim token</label>
-                    <input id="claim-token" v-model="claimToken" :type="showClaimToken ? 'text' : 'password'" autocomplete="off" placeholder="Filled after a successful claim" />
-                    <button type="button" class="outline" :aria-label="showClaimToken ? 'Hide claim token' : 'Show claim token'" @click="showClaimToken = !showClaimToken">{{ showClaimToken ? 'Hide' : 'Show' }}</button>
+              </section>
+
+              <section class="stage" :class="stageClass('decide')">
+                <div class="stage-rail"><span>2</span></div>
+                <div class="stage-body">
+                  <h2>A person decides in Telegram</h2>
+                  <div class="chat" aria-label="Simulated chat">
+                    <div class="chat-head"><strong>JaGate</strong><span>{{ clientId }}</span></div>
+                    <div class="thread">
+                      <p v-if="selected.deliveryStatus !== 'delivered'" class="chat-system">{{ deliveryLine(selected) }}</p>
+                      <div class="message" :class="{ undelivered: selected.deliveryStatus !== 'delivered' }">
+                        <span class="sender">JaGate</span>
+                        <div class="bubble">
+                          <strong>{{ selected.title }}</strong>
+                          <p>{{ selected.description }}</p>
+                          <p v-for="detail in selected.details" :key="detail.label + detail.value"><b>{{ detail.label }}:</b> {{ detail.value }}</p>
+                          <p class="message-meta">Client {{ selected.clientId }} · {{ selected.action }} · {{ selected.id.slice(0, 8) }}<br>Expires {{ new Date(selected.expiresAt).toLocaleString() }}<template v-if="selected.status !== 'pending'"><br>Status {{ selected.status }}</template></p>
+                        </div>
+                        <div v-if="mode === 'simulated' && selected.deliveryStatus === 'delivered'" class="keyboard">
+                          <button type="button" :disabled="busy || !requestId" @click="decide('approve')">Approve</button>
+                          <button type="button" :disabled="busy || !requestId" @click="decide('reject')">Reject</button>
+                        </div>
+                      </div>
+                      <div v-if="telegramReply" class="message">
+                        <span class="sender">JaGate</span>
+                        <p class="bubble reply" aria-live="polite">{{ telegramReply }}</p>
+                      </div>
+                    </div>
+                    <div v-if="mode === 'simulated'" class="pressing">
+                      <label>Pressing as
+                        <select v-model="actor" aria-label="Who presses the button">
+                          <option value="allowed">Allowlisted approver</option>
+                          <option value="outsider">Someone else</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div v-else class="pressing">
+                      <p class="hint">Approve or reject in this client’s Telegram chat, then refresh.</p>
+                      <button type="button" :disabled="busy" @click="openCurrent">Refresh</button>
+                    </div>
                   </div>
-                  <label>Result
-                    <select v-model="resultStatus" aria-label="Result">
-                      <option value="succeeded">Succeeded</option>
-                      <option value="failed">Failed</option>
-                    </select>
-                  </label>
-                  <label>Summary<input v-model="resultSummary" maxlength="300" /></label>
+                  <div v-if="mode === 'simulated'" class="clock">
+                    <p class="hint">Simulated time {{ simulatedNowLabel }}. A pending request expires when the clock passes its deadline. An approval already recorded stays approved.</p>
+                    <div class="clock-row">
+                      <label>Seconds<input v-model.number="advanceSeconds" type="number" min="1" max="86400" aria-label="Seconds to move the clock" /></label>
+                      <button type="button" :disabled="busy" @click="advanceTime">Move the clock forward</button>
+                    </div>
+                  </div>
                 </div>
-                <p class="hint">This reports an outcome. The playground does not execute the proposed action.</p>
-              </template>
-              <div v-else-if="selected" class="facts">
-                <div><small>DECISION</small><strong>{{ selected.status }}</strong></div>
-                <div><small>DELIVERY</small><strong>{{ selected.deliveryStatus }}</strong></div>
-                <div><small>EXECUTION</small><strong>{{ selected.executionStatus }}</strong></div>
-                <div><small>EXPIRES</small><strong>{{ new Date(selected.expiresAt).toLocaleString() }}</strong></div>
+              </section>
+
+              <section class="stage" :class="stageClass('act')">
+                <div class="stage-rail"><span>3</span></div>
+                <div class="stage-body">
+                  <h2>The application continues</h2>
+                  <template v-if="selected.status !== 'approved'">
+                    <p>The application waits. It claims an approval only after the decision is approved.</p>
+                  </template>
+                  <template v-else-if="selected.executionStatus === 'unclaimed'">
+                    <p>Claim this approval once. The application then performs the action itself and reports what happened.</p>
+                    <button type="button" :disabled="busy" @click="claimApproval">Claim this approval</button>
+                  </template>
+                  <template v-else>
+                    <p v-if="selected.resultAt">Reported {{ selected.executionStatus }}<template v-if="selected.resultSummary">: {{ selected.resultSummary }}</template>.</p>
+                    <p v-else>Claimed. The application performs the action, then reports succeeded or failed.</p>
+                    <div class="inline-field">
+                      <label for="claim-token">Claim token</label>
+                      <input id="claim-token" v-model="claimToken" :type="showClaimToken ? 'text' : 'password'" autocomplete="off" placeholder="Filled after a successful claim" />
+                      <button type="button" :aria-label="showClaimToken ? 'Hide claim token' : 'Show claim token'" @click="showClaimToken = !showClaimToken">{{ showClaimToken ? 'Hide' : 'Show' }}</button>
+                    </div>
+                    <label>Summary<input v-model="resultSummary" maxlength="300" /></label>
+                    <div class="chat-actions">
+                      <button type="button" :disabled="busy || !claimToken" @click="report('succeeded')">Report succeeded</button>
+                      <button type="button" :disabled="busy || !claimToken" @click="report('failed')">Report failed</button>
+                      <button type="button" :disabled="busy" @click="claimApproval">Claim again</button>
+                    </div>
+                    <p class="hint">The token is returned once. Change it to see a rejected report. Claiming again conflicts, because the approval is already claimed.</p>
+                  </template>
+                </div>
+              </section>
+
+              <section class="stage" :class="stageClass('record')">
+                <div class="stage-rail"><span>4</span></div>
+                <div class="stage-body">
+                  <h2>Request history</h2>
+                  <p v-if="!eventPage" class="hint">Loading the timeline…</p>
+                  <p v-else-if="!eventPage.items.length" class="hint">No events on this page.</p>
+                  <ol v-else class="timeline">
+                    <li v-for="event in eventPage.items" :key="event.sequence">
+                      <span class="dot" :class="statusClass(event.type)"></span>
+                      <div>
+                        <strong>{{ eventLabel(event.type) }}</strong>
+                        <small>#{{ event.sequence }} · <time :datetime="event.occurredAt">{{ new Date(event.occurredAt).toLocaleString() }}</time><template v-if="event.actorId"> · Approver {{ event.actorId }}</template><template v-if="event.attempt"> · Attempt {{ event.attempt }}</template></small>
+                      </div>
+                    </li>
+                  </ol>
+                  <div class="pager">
+                    <label>Events per page<input v-model.number="eventLimit" type="number" min="1" max="100" @change="reloadEvents" /></label>
+                    <span>Page {{ eventCursorStack.length + 1 }}</span>
+                    <div class="chat-actions">
+                      <button type="button" :disabled="busy || !eventCursorStack.length" @click="previousEventPage">Previous</button>
+                      <button type="button" :disabled="busy || !eventPage?.nextCursor" @click="nextEventPage">Next</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </template>
+        </template>
+
+        <section v-else-if="view === 'list'" class="card">
+          <h1>All requests</h1>
+          <p class="lead">Every row belongs to the selected client. Open one to continue its approval.</p>
+          <div class="attention" role="group" aria-label="Requests needing attention">
+            <button type="button" :disabled="busy" @click="applyAttention('delivery')">Failed delivery</button>
+            <button type="button" :disabled="busy" @click="applyAttention('claimed')">Old claims</button>
+            <button type="button" :disabled="busy" @click="applyAttention('expiry')">Expiring soon</button>
+            <button type="button" :disabled="busy" @click="applyAttention('all')">Clear filters</button>
+            <label>Window (minutes)<input v-model.number="attentionMinutes" type="number" min="1" max="1440" aria-label="Attention window in minutes" /></label>
+          </div>
+          <p class="hint">Failed delivery lists pending requests whose Telegram message failed. Old claims are approvals still claimed, with no result, before the cutoff. Expiring soon lists pending requests that reach their deadline inside the window. The cutoff stays fixed while you page.</p>
+          <div class="fields">
+            <label>Decision
+              <select v-model="listStatus" aria-label="Decision">
+                <option value="">Any</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="expired">Expired</option><option value="cancelled">Cancelled</option>
+              </select>
+            </label>
+            <label>Delivery
+              <select v-model="listDeliveryStatus" aria-label="Delivery">
+                <option value="">Any</option><option value="pending">Pending</option><option value="retrying">Retrying</option><option value="delivered">Delivered</option><option value="failed">Failed</option>
+              </select>
+            </label>
+            <label>Application
+              <select v-model="listExecutionStatus" aria-label="Application">
+                <option value="">Any</option><option value="unclaimed">Unclaimed</option><option value="claimed">Claimed</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option>
+              </select>
+            </label>
+            <label>Page size<input v-model.number="listLimit" type="number" min="1" max="100" /></label>
+            <label>Claimed before <span class="muted">UTC</span><input v-model.trim="listClaimedBefore" placeholder="UTC timestamp" spellcheck="false" /></label>
+            <label>Expires before <span class="muted">UTC</span><input v-model.trim="listExpiresBefore" placeholder="UTC timestamp" spellcheck="false" /></label>
+          </div>
+          <button type="button" :disabled="busy || !clientId" @click="showRequests">Show these requests</button>
+          <div v-if="listPage" class="result-list">
+            <p v-if="!listPage.items.length" class="hint">No requests match these filters.</p>
+            <button v-for="item in listPage.items" :key="item.id" type="button" class="row-button" @click="openRequest(item)">
+              <span class="row-copy"><strong>{{ item.title }}</strong><small>{{ item.status }} · {{ item.deliveryStatus }} · {{ item.executionStatus }}</small><small>{{ new Date(item.createdAt).toLocaleString() }}</small></span>
+            </button>
+            <div class="pager">
+              <span>Page {{ listCursorStack.length + 1 }}</span>
+              <div class="chat-actions">
+                <button type="button" :disabled="busy || !listCursorStack.length" @click="previousPage">Previous</button>
+                <button type="button" :disabled="busy || !listPage.nextCursor" @click="nextPage">Next</button>
               </div>
-              <p v-if="operation === 'claim'" class="hint">Claim an approved request once. The token appears in the response and fills the report form.</p>
-              <p v-if="operation === 'cancel'" class="hint">Cancels a pending approval. The request cannot be decided afterward.</p>
-            </template>
-            <template v-else>
-              <p><strong>{{ operation === 'health' ? 'Gateway health' : 'Gateway readiness' }}</strong></p>
-              <p class="hint">This public endpoint does not require authorization or a request body. Click Send to inspect its response.</p>
-            </template>
-          </div>
-        </article>
-
-        <article v-if="operation === 'events' && eventPage" aria-label="Request timeline">
-          <header class="panel-head"><h1>Request timeline</h1><span class="muted">{{ eventPage.items.length }} shown</span></header>
-          <p v-if="!eventPage.items.length" class="hint">No more events for this request.</p>
-          <ol v-else class="timeline">
-            <li v-for="event in eventPage.items" :key="event.sequence">
-              <span class="dot" :class="statusClass(event.type)"></span>
-              <div><strong>{{ eventLabel(event.type) }}</strong><small>#{{ event.sequence }} · <time :datetime="event.occurredAt">{{ new Date(event.occurredAt).toLocaleString() }}</time><template v-if="event.actorId"> · Approver {{ event.actorId }}</template><template v-if="event.attempt"> · Attempt {{ event.attempt }}</template></small></div>
-            </li>
-          </ol>
-          <div class="pager"><span>Page {{ eventCursorStack.length + 1 }}</span><div class="actions"><button type="button" class="outline" :disabled="busy || !eventCursorStack.length" @click="previousEventPage">Previous</button><button type="button" class="outline" :disabled="busy || !eventPage.nextCursor" @click="nextEventPage">Next</button></div></div>
-        </article>
-
-        <article v-if="operation === 'list' && listPage" aria-label="Listed requests">
-          <header class="panel-head"><h1>Requests in this page</h1><span class="muted">{{ listPage.items.length }} shown</span></header>
-          <p v-if="!listPage.items.length" class="hint">No requests match these filters.</p>
-          <button v-for="item in listPage.items" :key="item.id" type="button" class="row-button" @click="selectRequest(item)">
-            <span class="row-copy"><strong>{{ item.title }}</strong><small>{{ item.id }} · {{ new Date(item.createdAt).toLocaleString() }}</small><small>Delivery: {{ item.deliveryStatus }} · Execution: {{ item.executionStatus }}<template v-if="item.claimedAt"> · Claimed: {{ new Date(item.claimedAt).toLocaleString() }}</template><template v-if="item.status === 'pending'"> · Expires: {{ new Date(item.expiresAt).toLocaleString() }}</template></small></span>
-            <span class="muted">{{ item.status }}</span>
-          </button>
-          <div class="pager"><span>Page {{ listCursorStack.length + 1 }}</span><div class="actions"><button type="button" class="outline" :disabled="busy || !listCursorStack.length" @click="previousPage">Previous</button><button type="button" class="outline" :disabled="busy || !listPage.nextCursor" @click="nextPage">Next</button></div></div>
-        </article>
-
-        <article v-if="operation === 'keyList' && keyPage" aria-label="Listed client keys">
-          <header class="panel-head"><h1>Client keys in this page</h1><span class="muted">{{ keyPage.items.length }} shown</span></header>
-          <p v-if="!keyPage.items.length" class="hint">No issued keys on this page.</p>
-          <button v-for="item in keyPage.items" :key="item.id" type="button" class="row-button" @click="selectClientKey(item)">
-            <span class="row-copy"><strong>{{ item.label }}</strong><small>{{ item.id }} · {{ item.scopes.join(', ') }}</small><small>{{ item.expiresAt ? 'Expires: ' + new Date(item.expiresAt).toLocaleString() : 'No expiry' }}</small></span>
-            <span class="muted">{{ keyState(item) }}</span>
-          </button>
-          <div class="pager"><span>Page {{ keyCursorStack.length + 1 }}</span><div class="actions"><button type="button" class="outline" :disabled="busy || !keyCursorStack.length" @click="previousKeyPage">Previous</button><button type="button" class="outline" :disabled="busy || !keyPage.nextCursor" @click="nextKeyPage">Next</button></div></div>
-        </article>
-
-        <article v-if="operation === 'audit' && auditPage" aria-label="Audit events">
-          <header class="panel-head"><h1>Client audit events</h1><span class="muted">{{ auditPage.items.length }} shown</span></header>
-          <p v-if="!auditPage.items.length" class="hint">No audit events match these filters.</p>
-          <div v-for="event in auditPage.items" :key="event.id" class="row-copy">
-            <strong>{{ event.type }}</strong>
-            <small>#{{ event.id }} · <time :datetime="event.occurredAt">{{ new Date(event.occurredAt).toLocaleString() }}</time> · {{ event.actor === 'bootstrap' ? 'Bootstrap key' : 'Issued key ' + event.actorKeyId }}</small>
-            <small v-if="event.requestId">Request {{ event.requestId }}</small>
-            <small v-if="event.subjectKeyId">Client key {{ event.subjectKeyId }}</small>
-          </div>
-          <div class="pager"><span>Page {{ auditCursorStack.length + 1 }}</span><div class="actions"><button type="button" class="outline" :disabled="busy || !auditCursorStack.length" @click="previousAuditPage">Previous</button><button type="button" class="outline" :disabled="busy || !auditPage.nextCursor" @click="nextAuditPage">Next</button></div></div>
-        </article>
-
-        <article v-if="mode === 'simulated'">
-          <header class="panel-head"><h2>Simulation controls</h2></header>
-          <div class="simulation">
-            <p class="hint">Drive the Telegram decision and time locally.</p>
-            <div class="actions">
-              <label>Decision actor
-                <select v-model="actor" aria-label="Decision actor">
-                  <option value="allowed">Allowlisted approver</option>
-                  <option value="outsider">Outsider</option>
-                </select>
-              </label>
-              <button type="button" class="outline" :disabled="busy || !requestId" @click="decide('approve')">Approve</button>
-              <button type="button" class="outline" :disabled="busy || !requestId" @click="decide('reject')">Reject</button>
-              <label>Seconds<input v-model.number="advanceSeconds" type="number" min="1" max="86400" aria-label="Seconds to advance" /></label>
-              <button type="button" class="outline" :disabled="busy" @click="advanceTime">Advance clock</button>
             </div>
           </div>
-        </article>
-        <article v-else><p class="hint">Approve or reject in your configured Telegram chat, then send <strong>Get request</strong> to refresh its state.</p></article>
+        </section>
 
-        <article>
-          <header class="response-head">
-            <h2>Output</h2>
-          </header>
+        <section v-else-if="view === 'keys'" class="card">
+          <h1>Keys</h1>
+          <p class="lead">The bootstrap key issues keys for this client. An issued key can call only the operations you allow, and it cannot issue keys or read the audit log.</p>
+          <div class="fields">
+            <label class="span-2">Name<input v-model="keyLabel" maxlength="80" placeholder="Name the app or worker" /></label>
+            <label class="span-2">Expires at <span class="muted">optional UTC</span><input v-model.trim="keyExpiresAt" placeholder="Leave empty for no expiry" spellcheck="false" /></label>
+          </div>
+          <div class="chat-actions">
+            <button type="button" @click="setKeyExpiryOneHour">Expire in 1 hour</button>
+            <button type="button" @click="keyExpiresAt = ''">No expiry</button>
+          </div>
+          <fieldset>
+            <legend>This key may</legend>
+            <div class="scopes">
+              <label v-for="scope in availableKeyScopes" :key="scope"><input type="checkbox" :checked="keyScopes.includes(scope)" @change="onScopeChange(scope, $event)" />{{ scopeLabels[scope] }} <span class="muted">{{ scope }}</span></label>
+            </div>
+          </fieldset>
+          <button type="button" :disabled="busy || !clientId || auth !== 'valid'" @click="issueKey">Issue key</button>
+          <div v-if="scopedKey" class="callout">
+            <p>A key is held for this browser session. It is shown once. Copy it, then call as that key.</p>
+            <div class="inline-field">
+              <label for="session-key">Issued key</label>
+              <input id="session-key" v-model="scopedKey" :type="showScopedKey ? 'text' : 'password'" autocomplete="off" spellcheck="false" />
+              <button type="button" :aria-label="showScopedKey ? 'Hide issued key' : 'Show issued key'" @click="showScopedKey = !showScopedKey">{{ showScopedKey ? 'Hide' : 'Show' }}</button>
+            </div>
+            <button type="button" @click="useIssuedKey">Call as this key</button>
+          </div>
+          <div class="section-row"><h2>Issued keys</h2><button type="button" :disabled="busy || !clientId" @click="showKeys">Show keys</button></div>
+          <p class="hint">Secret values are never listed. Revocation takes effect on the next call. The bootstrap key is rotated in .env.</p>
+          <label>Page size<input v-model.number="keyLimit" type="number" min="1" max="100" aria-label="Key page size" /></label>
+          <div v-if="keyPage" class="result-list">
+            <p v-if="!keyPage.items.length" class="hint">No issued keys on this page.</p>
+            <div v-for="item in keyPage.items" :key="item.id" class="key-row">
+              <span class="row-copy"><strong>{{ item.label }}</strong><small>{{ item.scopes.join(', ') }}</small><small>{{ item.expiresAt ? 'Expires ' + new Date(item.expiresAt).toLocaleString() : 'No expiry' }}</small></span>
+              <span class="muted">{{ keyState(item) }}</span>
+              <button type="button" :disabled="busy || !!item.revokedAt" @click="revokeKey(item.id)">Revoke</button>
+            </div>
+            <div class="pager">
+              <span>Page {{ keyCursorStack.length + 1 }}</span>
+              <div class="chat-actions">
+                <button type="button" :disabled="busy || !keyCursorStack.length" @click="previousKeyPage">Previous</button>
+                <button type="button" :disabled="busy || !keyPage.nextCursor" @click="nextKeyPage">Next</button>
+              </div>
+            </div>
+          </div>
+          <div class="section-row"><h2>Audit</h2><button type="button" :disabled="busy || !clientId || auth !== 'valid'" @click="showAudit">Show audit</button></div>
+          <p class="hint">Newest first. Rows name key ids, never the secret or the claim token. An issued key cannot read this list.</p>
+          <div class="fields">
+            <label>Page size<input v-model.number="auditLimit" type="number" min="1" max="100" aria-label="Audit page size" /></label>
+            <label>Request id<input v-model.trim="auditRequestId" placeholder="Filter by request" spellcheck="false" /></label>
+            <label class="span-2">Key id<input v-model.trim="auditKeyId" placeholder="Actor or affected key" spellcheck="false" /></label>
+          </div>
+          <div v-if="auditPage" class="result-list">
+            <p v-if="!auditPage.items.length" class="hint">No audit events match these filters.</p>
+            <div v-for="event in auditPage.items" :key="event.id" class="row-copy audit-row">
+              <strong>{{ auditLabel(event.type) }}</strong>
+              <small><time :datetime="event.occurredAt">{{ new Date(event.occurredAt).toLocaleString() }}</time> · {{ event.actor === 'bootstrap' ? 'Bootstrap key' : 'Issued key ' + event.actorKeyId }}</small>
+              <small v-if="event.requestId">Request {{ event.requestId }}</small>
+              <small v-if="event.subjectKeyId">Key {{ event.subjectKeyId }}</small>
+            </div>
+            <div class="pager">
+              <span>Page {{ auditCursorStack.length + 1 }}</span>
+              <div class="chat-actions">
+                <button type="button" :disabled="busy || !auditCursorStack.length" @click="previousAuditPage">Previous</button>
+                <button type="button" :disabled="busy || !auditPage.nextCursor" @click="nextAuditPage">Next</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section v-else class="card">
+          <h1>Gateway</h1>
+          <p class="lead">Health and readiness are public. They answer even when Calling as is missing or invalid.</p>
+          <div class="gateway-actions">
+            <button type="button" :disabled="busy" @click="execute('health')">Check health</button>
+            <button type="button" :disabled="busy" @click="execute('ready')">Check readiness</button>
+          </div>
+          <p class="hint">Readiness needs working storage and, on a real gateway, a live Telegram connection. The simulator reports ready without a bot.</p>
+        </section>
+
+        <details v-if="visibleEntry || entries.length" class="api-panel">
+          <summary>
+            <span>API response</span>
+            <strong v-if="visibleEntry" :class="visibleEntry.status >= 400 ? 'status-bad' : 'status-ok'">HTTP {{ visibleEntry.status }}</strong>
+          </summary>
           <div class="editor-bar">
             <div class="tabs" role="tablist" aria-label="Response view">
               <button type="button" role="tab" :aria-selected="responseTab === 'body'" @click="responseTab = 'body'">Body</button>
               <button type="button" role="tab" :aria-selected="responseTab === 'history'" @click="responseTab = 'history'">History ({{ entries.length }})</button>
             </div>
-            <button v-if="visibleEntry && responseTab === 'body'" type="button" class="outline" @click="copyResponse">{{ copied ? 'Copied' : 'Copy JSON' }}</button>
+            <button v-if="visibleEntry && responseTab === 'body'" type="button" @click="copyResponse">{{ copied ? 'Copied' : 'Copy JSON' }}</button>
           </div>
-          <div v-if="responseTab === 'body'" class="output">
+          <div v-if="responseTab === 'body'">
             <template v-if="visibleEntry">
-              <p class="section-label"><span>{{ visibleEntry.label }}</span><span><strong :class="visibleEntry.status >= 400 ? 'status-bad' : 'status-ok'">HTTP {{ visibleEntry.status }}</strong> {{ visibleEntry.time }}</span></p>
+              <p class="hint">{{ visibleEntry.label }} · {{ visibleEntry.time }}</p>
               <pre><code>{{ JSON.stringify(visibleEntry.body, null, 2) }}</code></pre>
             </template>
-            <div v-else class="empty"><strong>Waiting for a request</strong><p>Send the selected request to see its response.<template v-if="entries.length"> Previous responses remain in History.</template></p></div>
           </div>
-          <div v-else>
-            <p v-if="!entries.length" class="empty">No responses in this session yet.</p>
+          <div v-else class="result-list">
             <button v-for="(entry, index) in entries" :key="index" type="button" class="row-button" :aria-pressed="activeEntry === index" @click="activeEntry = index; responseTab = 'body'">
               <span class="meta" :class="entry.status >= 400 ? 'status-bad' : 'status-ok'">{{ entry.status }}</span>
               <strong class="row-copy">{{ entry.label }}</strong>
               <time class="muted">{{ entry.time }}</time>
             </button>
           </div>
-        </article>
+        </details>
       </main>
     </div>
   </div>

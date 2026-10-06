@@ -6,7 +6,7 @@ import { GatewayCore } from '../src/core.js';
 import { createHttpServer } from '../src/http.js';
 import type { CreateRequestInput } from '../src/model.js';
 import { openDatabase } from '../src/storage.js';
-import { TelegramGateway, type TelegramTransport, type Update } from '../src/telegram.js';
+import { TelegramApiError, TelegramGateway, type TelegramTransport, type Update } from '../src/telegram.js';
 
 const clients = ['ci-pipeline', 'cloud-ops', 'billing-service'] as const;
 type ClientId = typeof clients[number];
@@ -68,10 +68,18 @@ const routes: ReadonlyMap<ClientId, TelegramRoute> = new Map([
 
 class SimulatedTelegram implements TelegramTransport {
   private nextMessageId: number;
+  failNextSend = false;
   readonly answers = new Map<string, string>();
   constructor(lastMessageId: number) { this.nextMessageId = lastMessageId + 1; }
   async check(): Promise<void> {}
-  async send(...args: Parameters<TelegramTransport['send']>): Promise<string> { void args; return String(this.nextMessageId++); }
+  async send(...args: Parameters<TelegramTransport['send']>): Promise<string> {
+    void args;
+    if (this.failNextSend) {
+      this.failNextSend = false;
+      throw new TelegramApiError('permanent', 'Simulated Telegram delivery failed');
+    }
+    return String(this.nextMessageId++);
+  }
   async poll(...args: Parameters<TelegramTransport['poll']>): Promise<Update[]> { void args; return []; }
   async answer(id: string, message: string): Promise<void> { this.answers.set(id, message); }
   async edit(): Promise<void> {}
@@ -119,6 +127,7 @@ export function createPlayground(options: PlaygroundOptions) {
     liveClients: liveKeys ? [...liveKeys.keys()] : [],
     gatewayUrl: liveUrl,
     simulatedNow: new Date(Date.now() + clockOffsetMs).toISOString(),
+    failNextDelivery: transport.failNextSend,
   }));
 
   app.post('/api/execute', async (request, reply) => {
@@ -181,6 +190,11 @@ export function createPlayground(options: PlaygroundOptions) {
       message: { chat: { id: Number(row.delivery_chat_id) }, message_id: Number(row.delivery_message_id) },
     } });
     return { message: transport.answers.get(callbackId), request: core.get(clientId, requestId) };
+  });
+
+  app.post('/api/fail-next-delivery', async () => {
+    transport.failNextSend = true;
+    return { armed: true };
   });
 
   app.post('/api/advance-time', async (request, reply) => {

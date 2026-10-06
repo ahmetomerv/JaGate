@@ -153,6 +153,27 @@ test('simulated decisions honor approvers, claims and one-time results across re
     ['request.created', 'delivery.delivered', 'decision.approved', 'execution.claimed', 'execution.failed']);
 });
 
+test('playground can fail the next simulated Telegram delivery', async () => {
+  const { app } = setup();
+  const session = await token(app);
+  assert.equal((await call(app, session, '/api/fail-next-delivery', {})).json().armed, true);
+  assert.equal((await app.inject({ method: 'GET', url: '/api/bootstrap' })).json().failNextDelivery, true);
+  const failed = (await call(app, session, '/api/execute', command('create', { payload: input('playground:fail-delivery') }))).json();
+  assert.equal(failed.status, 201);
+  const id = failed.body.id as string;
+  const fetched = (await call(app, session, '/api/execute', command('get', { requestId: id }))).json();
+  assert.equal(fetched.body.deliveryStatus, 'failed');
+  const listed = (await call(app, session, '/api/execute', command('list', {
+    filters: { status: 'pending', deliveryStatus: 'failed' },
+  }))).json();
+  assert.deepEqual(listed.body.items.map((item: { id: string }) => item.id), [id]);
+  assert.equal((await call(app, session, '/api/decide', {
+    requestId: id, clientId: 'ci-pipeline', decision: 'approve', actor: 'allowed',
+  })).statusCode, 409);
+  const next = (await call(app, session, '/api/execute', command('create', { payload: input('playground:deliver-again') }))).json();
+  assert.equal((await call(app, session, '/api/execute', command('get', { requestId: next.body.id }))).json().body.deliveryStatus, 'delivered');
+});
+
 test('simulated clock expires pending requests and cancellation stops decisions', async () => {
   const { app } = setup();
   const session = await token(app);
