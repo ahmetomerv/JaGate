@@ -692,7 +692,7 @@ onMounted(async () => {
         <div class="inbox-list">
           <button v-for="item in history" :key="item.id" type="button" :aria-pressed="requestId === item.id && !composing" @click="openRequest(item)">
             <span class="inbox-title">{{ item.title }}</span>
-            <span class="inbox-meta"><span class="dot" :class="statusClass(item.status)"></span><span>{{ item.id.slice(0, 8) }}</span><span class="status-word">{{ item.status }}</span></span>
+            <span class="inbox-meta"><span class="dot" :class="statusClass(item.status)"></span><span class="inbox-id">{{ item.id.slice(0, 8) }}</span><span class="status-word">{{ item.status }}</span></span>
           </button>
         </div>
       </aside>

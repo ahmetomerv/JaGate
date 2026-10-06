@@ -226,11 +226,21 @@ p {
 
 .inbox-meta {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 0.45rem;
   color: var(--text);
   font-size: 0.8rem;
   font-weight: 500;
+  line-height: 1;
+}
+
+.inbox-meta .dot {
+  align-self: center;
+}
+
+.inbox-id {
+
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .status-word {
@@ -377,6 +387,7 @@ label textarea {
 
 .stages {
   max-width: 46rem;
+  padding: 1.15rem 1.15rem 1.35rem;
 }
 
 .stage {
@@ -386,13 +397,18 @@ label textarea {
   margin-top: 1.5rem;
 }
 
+.stages > .stage:first-child {
+  margin-top: 0;
+}
+
 .stage-rail {
-  color: var(--muted);
+  color: #d4d4d4;
   font-weight: 600;
 }
 
 .stage.current .stage-rail {
-  color: var(--accent);
+  padding-top: 0.9rem;
+  color: #d4d4d4;
 }
 
 .stage-body {
@@ -402,6 +418,13 @@ label textarea {
 
 .stage:last-child .stage-body {
   border-bottom: 0;
+}
+
+.stage.current .stage-body {
+  padding: 0.9rem 1rem 0.85rem;
+  border: 1px solid #6e6e6e;
+  border-radius: 6px;
+  background: #1a1a1a;
 }
 
 .chat {
