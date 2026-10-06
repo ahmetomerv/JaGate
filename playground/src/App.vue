@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 
 type Mode = 'simulated' | 'live';
 type View = 'approval' | 'list' | 'keys' | 'gateway';
@@ -37,6 +37,7 @@ const scopeLabels: Record<ClientKeyScope, string> = {
 const bootstrap = ref<Bootstrap | null>(null);
 const mode = ref<Mode>('simulated');
 const view = ref<View>('approval');
+const sidebarSelection = ref('');
 const clientId = ref('');
 const auth = ref<'valid' | 'scoped' | 'missing' | 'invalid'>('valid');
 const scopedKey = ref('');
@@ -402,6 +403,15 @@ async function openCurrent() {
   storyLoading.value = false;
   if (result?.status === 200) await loadEvents();
 }
+function selectFromInbox(item: RequestView) {
+  sidebarSelection.value = item.id;
+  void openRequest(item);
+}
+function clearSidebarSelection(event: Event) {
+  const target = event.target;
+  if (target instanceof Element && target.closest('.inbox-list')) return;
+  sidebarSelection.value = '';
+}
 async function openRequest(item: RequestView) {
   if (requestId.value !== item.id) claimToken.value = '';
   requestId.value = item.id;
@@ -616,6 +626,8 @@ function deliveryLine(item: RequestView) {
 }
 
 onMounted(async () => {
+  document.addEventListener('pointerdown', clearSidebarSelection);
+  document.addEventListener('focusin', clearSidebarSelection);
   try {
     const response = await fetch('/api/bootstrap');
     if (!response.ok) throw new Error('Could not start the playground');
@@ -625,6 +637,10 @@ onMounted(async () => {
     failNextDelivery.value = bootstrap.value.failNextDelivery === true;
     clientId.value = bootstrap.value.simulatedClients[0] ?? '';
   } catch (cause) { error.value = cause instanceof Error ? cause.message : 'Could not start the playground'; }
+});
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', clearSidebarSelection);
+  document.removeEventListener('focusin', clearSidebarSelection);
 });
 </script>
 
@@ -690,7 +706,7 @@ onMounted(async () => {
         <button type="button" class="new-approval" @click="newApproval">New approval</button>
         <p v-if="!history.length" class="hint">Approvals for this client will show up here.</p>
         <div class="inbox-list">
-          <button v-for="item in history" :key="item.id" type="button" :aria-pressed="requestId === item.id && !composing" @click="openRequest(item)">
+          <button v-for="item in history" :key="item.id" type="button" :aria-pressed="sidebarSelection === item.id" @click="selectFromInbox(item)">
             <span class="inbox-title">{{ item.title }}</span>
             <span class="inbox-meta"><span class="dot" :class="statusClass(item.status)"></span><span class="inbox-id">{{ item.id.slice(0, 8) }}</span><span class="status-word">{{ item.status }}</span></span>
           </button>
