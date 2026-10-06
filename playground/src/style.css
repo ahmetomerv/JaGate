@@ -565,6 +565,19 @@ label textarea {
 .dot.wait { background: #ffb020; }
 .dot.expired { background: #d0d0d0; }
 
+.inbox-list .dot.wait {
+  animation: pending-dot 2.2s ease-in-out infinite;
+}
+
+@keyframes pending-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.12; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inbox-list .dot.wait { animation: none; }
+}
+
 .pager {
   justify-content: space-between;
   margin-top: 0.85rem;
