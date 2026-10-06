@@ -735,12 +735,10 @@ onUnmounted(() => {
                 <button type="button" @click="removeDetail(index)">Remove</button>
               </div>
             </div>
-            <div class="fields">
-              <label>Idempotency key<input v-model="idempotencyKey" maxlength="128" spellcheck="false" /></label>
-              <div class="field-actions">
-                <button type="button" @click="idempotencyKey = 'playground:' + Date.now()">New key</button>
-                <p class="hint">Ask again with the same key and the same text to get the original request. Change the text and that key is rejected.</p>
-              </div>
+            <div class="key-line">
+              <label for="idempotency-key">Idempotency key<input id="idempotency-key" v-model="idempotencyKey" maxlength="128" spellcheck="false" /></label>
+              <button type="button" @click="idempotencyKey = 'playground:' + Date.now()">New key</button>
+              <p class="hint">Ask again with the same key and the same text to get the original request. Change the text and that key is rejected.</p>
             </div>
             <details class="extra">
               <summary>Metadata, stored with the request and omitted from Telegram</summary>
