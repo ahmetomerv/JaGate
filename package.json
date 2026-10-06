@@ -35,7 +35,7 @@
     }
   },
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsx watch --env-file=.env src/main.ts",
     "start": "node dist/src/main.js",
     "start:local": "node --env-file=.env dist/src/main.js",
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && cp -R migrations dist/migrations",
