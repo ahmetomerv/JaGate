@@ -40,12 +40,14 @@ try {
   const decision = await client.waitForDecision(request.id, { timeoutMs: 900_000 });
   if (decision.status !== 'approved') {
     console.log(`No action: ${decision.status}`);
-  } else {
+  }
+  else {
     const { claimToken } = await client.claim(request.id);
     const file = join(tmpdir(), `jagate-example-${request.id}.txt`);
     try {
       await writeFile(file, `Approved ${revision}\n`, { flag: 'wx' });
-    } catch (error) {
+    }
+    catch (error) {
       await client.reportResult(request.id, {
         claimToken,
         status: 'failed',
@@ -60,10 +62,12 @@ try {
     });
     console.log(file);
   }
-} catch (error) {
+}
+catch (error) {
   if (error instanceof WaitTimeoutError) {
     console.log('Stopped waiting; the request may still be pending. Check it later.');
-  } else {
+  }
+  else {
     throw error;
   }
 }
@@ -100,7 +104,7 @@ for (const request of page.items) {
   const timeline = await reader.getRequestEvents(request.id, { limit: 50 });
   console.log(
     request.id,
-    timeline.items.map((event) => event.type),
+    timeline.items.map(event => event.type),
   );
 }
 // If page.nextCursor is non-null, pass it as cursor with the same filters and limit.

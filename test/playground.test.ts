@@ -46,15 +46,17 @@ async function call(
   });
 }
 
-const input = (idempotencyKey = 'playground:test') => ({
-  idempotencyKey,
-  action: 'local-test',
-  title: 'Test approval',
-  description: 'Harmless local approval',
-  details: [{ label: 'Target', value: 'local' }],
-  metadata: { source: 'test' },
-  expiresInSeconds: 900,
-});
+function input(idempotencyKey = 'playground:test') {
+  return {
+    idempotencyKey,
+    action: 'local-test',
+    title: 'Test approval',
+    description: 'Harmless local approval',
+    details: [{ label: 'Target', value: 'local' }],
+    metadata: { source: 'test' },
+    expiresInSeconds: 900,
+  };
+}
 
 function command(operation: string, extras: Record<string, unknown> = {}) {
   return { mode: 'simulated', clientId: 'ci-pipeline', operation, auth: 'valid', ...extras };
@@ -803,7 +805,8 @@ test('live mode keeps client keys in the backend while calling the real HTTP rou
       ).json().status,
       200,
     );
-  } finally {
+  }
+  finally {
     await gateway.close();
     db.close();
   }

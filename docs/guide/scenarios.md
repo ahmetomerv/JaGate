@@ -48,8 +48,9 @@ if (decision.status === 'approved') {
     summary: `Production deployed at ${revision}`,
   });
   const timeline = await client.getRequestEvents(request.id);
-  console.log(timeline.items.map((event) => event.type));
-} else {
+  console.log(timeline.items.map(event => event.type));
+}
+else {
   console.log(`No deployment: ${decision.status}`);
 }
 ```

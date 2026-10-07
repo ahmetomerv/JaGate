@@ -1,13 +1,14 @@
 {
   "name": "jagate",
+  "type": "module",
   "version": "0.1.0",
   "description": "A small self-hosted human approval gateway",
   "license": "MIT",
+  "homepage": "https://ahmetomerv.github.io/JaGate/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ahmetomerv/JaGate.git"
   },
-  "homepage": "https://ahmetomerv.github.io/JaGate/",
   "bugs": "https://github.com/ahmetomerv/JaGate/issues",
   "keywords": [
     "approval",
@@ -16,23 +17,22 @@
     "human-in-the-loop",
     "self-hosted"
   ],
-  "type": "module",
-  "engines": {
-    "node": ">=24.21.0 <25"
-  },
-  "files": [
-    "assets",
-    "dist",
-    "README.md",
-    "CONTRIBUTING.md",
-    "CHANGELOG.md",
-    "LICENSE"
-  ],
   "exports": {
     ".": {
       "types": "./dist/src/client.d.ts",
       "default": "./dist/src/client.js"
     }
+  },
+  "files": [
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "README.md",
+    "assets",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24.21.0 <25"
   },
   "scripts": {
     "dev": "tsx watch --env-file=.env src/main.ts",
@@ -47,12 +47,12 @@
     "playground": "node --import tsx playground/main.ts",
     "playground:build": "vite build --config playground/vite.config.ts",
     "lint": "eslint .",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "lint:fix": "eslint . --fix",
+    "format": "eslint . --fix",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "verify": "npm run typecheck && npm test && npm run lint && npm run format:check && npm run build && npm run docs:build && npm run playground:build"
+    "verify": "npm run typecheck && npm test && npm run lint && npm run build && npm run docs:build && npm run playground:build"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",
@@ -60,15 +60,16 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@antfu/eslint-config": "^9.5.1",
+    "@prettier/plugin-xml": "^3.4.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.0.0",
     "@vitejs/plugin-vue": "5.2.4",
     "eslint": "^9.0.0",
-    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-format": "^2.0.1",
     "prettier": "^3.9.9",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.0.0",
     "vite": "5.4.21",
     "vitepress": "^1.6.4",
     "vue": "3.5.43"

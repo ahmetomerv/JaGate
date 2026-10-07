@@ -3,23 +3,23 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 
 type Mode = 'simulated' | 'live';
 type View = 'approval' | 'list' | 'keys' | 'gateway';
-type Operation =
-  | 'create'
-  | 'list'
-  | 'get'
-  | 'events'
-  | 'cancel'
-  | 'claim'
-  | 'result'
-  | 'keyCreate'
-  | 'keyList'
-  | 'keyRevoke'
-  | 'audit'
-  | 'health'
-  | 'ready';
-type ClientKeyScope =
-  'requests:create' | 'requests:read' | 'requests:cancel' | 'requests:claim' | 'requests:result';
-type ClientKeyView = {
+type Operation
+  = | 'create'
+    | 'list'
+    | 'get'
+    | 'events'
+    | 'cancel'
+    | 'claim'
+    | 'result'
+    | 'keyCreate'
+    | 'keyList'
+    | 'keyRevoke'
+    | 'audit'
+    | 'health'
+    | 'ready';
+type ClientKeyScope
+  = 'requests:create' | 'requests:read' | 'requests:cancel' | 'requests:claim' | 'requests:result';
+interface ClientKeyView {
   id: string;
   clientId: string;
   label: string;
@@ -27,9 +27,9 @@ type ClientKeyView = {
   createdAt: string;
   expiresAt: string | null;
   revokedAt: string | null;
-};
-type KeyPage = { items: ClientKeyView[]; nextCursor: string | null };
-type AuditEvent = {
+}
+interface KeyPage { items: ClientKeyView[]; nextCursor: string | null }
+interface AuditEvent {
   id: number;
   type: string;
   occurredAt: string;
@@ -37,10 +37,10 @@ type AuditEvent = {
   actorKeyId: string | null;
   requestId: string | null;
   subjectKeyId: string | null;
-};
-type AuditPage = { items: AuditEvent[]; nextCursor: string | null };
-type Detail = { label: string; value: string };
-type RequestView = {
+}
+interface AuditPage { items: AuditEvent[]; nextCursor: string | null }
+interface Detail { label: string; value: string }
+interface RequestView {
   id: string;
   clientId: string;
   title: string;
@@ -57,18 +57,18 @@ type RequestView = {
   claimedAt: string | null;
   resultSummary: string | null;
   resultAt?: string | null;
-};
-type ListPage = { items: RequestView[]; nextCursor: string | null };
-type RequestEvent = {
+}
+interface ListPage { items: RequestView[]; nextCursor: string | null }
+interface RequestEvent {
   sequence: number;
   type: string;
   occurredAt: string;
   actorId: string | null;
   attempt: number | null;
-};
-type EventPage = { items: RequestEvent[]; nextCursor: string | null };
-type Entry = { time: string; label: string; status: number; body: unknown };
-type ExampleRequest = {
+}
+interface EventPage { items: RequestEvent[]; nextCursor: string | null }
+interface Entry { time: string; label: string; status: number; body: unknown }
+interface ExampleRequest {
   idempotencyKey: string;
   action: string;
   title: string;
@@ -76,9 +76,9 @@ type ExampleRequest = {
   details: Detail[];
   metadata: Record<string, unknown>;
   expiresInSeconds: number;
-};
-type SimulatedExample = { label: string; scenario: string; request: ExampleRequest };
-type Bootstrap = {
+}
+interface SimulatedExample { label: string; scenario: string; request: ExampleRequest }
+interface Bootstrap {
   token: string;
   simulatedClients: string[];
   simulatedExamples: Record<string, SimulatedExample>;
@@ -86,8 +86,8 @@ type Bootstrap = {
   gatewayUrl: string;
   simulatedNow: string;
   failNextDelivery?: boolean;
-};
-type Executed = { status: number; body: Record<string, unknown> };
+}
+interface Executed { status: number; body: Record<string, unknown> }
 
 const defaultRequest: ExampleRequest = {
   idempotencyKey: 'playground:local-test',
@@ -161,7 +161,7 @@ const action = ref(defaultRequest.action);
 const title = ref(defaultRequest.title);
 const description = ref(defaultRequest.description);
 const expiresInSeconds = ref(defaultRequest.expiresInSeconds);
-const detailRows = ref<Detail[]>(defaultRequest.details.map((item) => ({ ...item })));
+const detailRows = ref<Detail[]>(defaultRequest.details.map(item => ({ ...item })));
 const metadataText = ref(JSON.stringify(defaultRequest.metadata, null, 2));
 const actor = ref<'allowed' | 'outsider'>('allowed');
 const advanceSeconds = ref(61);
@@ -188,13 +188,13 @@ const simulatedExample = computed(() =>
   mode.value === 'simulated' ? bootstrap.value?.simulatedExamples[clientId.value] : undefined,
 );
 const selected = computed(() =>
-  [...history.value, ...(listPage.value?.items ?? [])].find((item) => item.id === requestId.value),
+  [...history.value, ...(listPage.value?.items ?? [])].find(item => item.id === requestId.value),
 );
 const visibleEntry = computed(() =>
   activeEntry.value === null ? undefined : entries.value[activeEntry.value],
 );
 const clientOptions = computed(() =>
-  clients.value.map((id) => ({
+  clients.value.map(id => ({
     value: id,
     label: mode.value === 'simulated' ? (bootstrap.value?.simulatedExamples[id]?.label ?? id) : id,
   })),
@@ -204,12 +204,14 @@ const simulatedNowLabel = computed(() =>
 );
 const phase = computed(() => {
   const item = selected.value;
-  if (!item || item.status === 'pending') return 'decide';
+  if (!item || item.status === 'pending')
+    return 'decide';
   if (
-    item.status === 'approved' &&
-    (item.executionStatus === 'unclaimed' || item.executionStatus === 'claimed')
-  )
+    item.status === 'approved'
+    && (item.executionStatus === 'unclaimed' || item.executionStatus === 'claimed')
+  ) {
     return 'act';
+  }
   return 'record';
 });
 const listFilters = computed(() => ({
@@ -277,9 +279,11 @@ watch([clientId, mode], () => {
   applyExample(simulatedExample.value?.request ?? defaultRequest);
   const openId = requestId.value;
   const keepOpen = !composing.value && openId.length > 0;
-  if (keepOpen) storyLoading.value = true;
+  if (keepOpen)
+    storyLoading.value = true;
   void refreshHistory().then(() => {
-    if (keepOpen && requestId.value === openId && !composing.value) void openCurrent();
+    if (keepOpen && requestId.value === openId && !composing.value)
+      void openCurrent();
   });
 });
 watch([requestId, clientId, mode], () => {
@@ -304,16 +308,17 @@ function applyExample(example: ExampleRequest) {
   title.value = example.title;
   description.value = example.description;
   expiresInSeconds.value = example.expiresInSeconds;
-  detailRows.value = example.details.map((item) => ({ ...item }));
+  detailRows.value = example.details.map(item => ({ ...item }));
   metadataText.value = JSON.stringify(example.metadata, null, 2);
 }
 function cleanDetails(): Detail[] {
   return detailRows.value
-    .filter((row) => row.label.trim() || row.value.trim())
-    .map((row) => ({ label: row.label.trim(), value: row.value.trim() }));
+    .filter(row => row.label.trim() || row.value.trim())
+    .map(row => ({ label: row.label.trim(), value: row.value.trim() }));
 }
 function addDetail() {
-  if (detailRows.value.length >= 10) return;
+  if (detailRows.value.length >= 10)
+    return;
   detailRows.value.push({ label: '', value: '' });
 }
 function removeDetail(index: number) {
@@ -322,7 +327,8 @@ function removeDetail(index: number) {
 function parsePreview(value: string) {
   try {
     return JSON.parse(value) as unknown;
-  } catch {
+  }
+  catch {
     return value;
   }
 }
@@ -334,21 +340,21 @@ function clearDisplayedResponse() {
 function applyAttention(kind: 'all' | 'delivery' | 'claimed' | 'expiry') {
   const minutes = Number(attentionMinutes.value);
   if (
-    kind !== 'all' &&
-    kind !== 'delivery' &&
-    (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)
+    kind !== 'all'
+    && kind !== 'delivery'
+    && (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440)
   ) {
     error.value = 'Choose a window from 1 to 1440 minutes.';
     return;
   }
   error.value = '';
   const now = Date.now() + (mode.value === 'simulated' ? simulatedClockOffset.value : 0);
-  listStatus.value =
-    kind === 'delivery' || kind === 'expiry' ? 'pending' : kind === 'claimed' ? 'approved' : '';
+  listStatus.value
+    = kind === 'delivery' || kind === 'expiry' ? 'pending' : kind === 'claimed' ? 'approved' : '';
   listDeliveryStatus.value = kind === 'delivery' ? 'failed' : '';
   listExecutionStatus.value = kind === 'claimed' ? 'claimed' : '';
-  listClaimedBefore.value =
-    kind === 'claimed' ? new Date(now - minutes * 60_000).toISOString() : '';
+  listClaimedBefore.value
+    = kind === 'claimed' ? new Date(now - minutes * 60_000).toISOString() : '';
   listExpiresBefore.value = kind === 'expiry' ? new Date(now + minutes * 60_000).toISOString() : '';
   listCursor.value = '';
   listCursorStack.value = [];
@@ -381,12 +387,14 @@ function stageClass(name: 'decide' | 'act' | 'record') {
   const current = phase.value === 'decide' ? 'decide' : phase.value === 'act' ? 'act' : 'record';
   const place = order.indexOf(name);
   const here = order.indexOf(current);
-  if (place < here) return 'done';
-  if (place === here) return 'current';
+  if (place < here)
+    return 'done';
+  if (place === here)
+    return 'current';
   return 'upcoming';
 }
 function remember(item: RequestView) {
-  history.value = [item, ...history.value.filter((existing) => existing.id !== item.id)].slice(
+  history.value = [item, ...history.value.filter(existing => existing.id !== item.id)].slice(
     0,
     100,
   );
@@ -394,14 +402,16 @@ function remember(item: RequestView) {
 function gatewayMessage(body: unknown, status: number) {
   if (body && typeof body === 'object' && 'error' in body) {
     const cause = (body as { error: unknown }).error;
-    if (typeof cause === 'string') return cause;
+    if (typeof cause === 'string')
+      return cause;
     if (
-      cause &&
-      typeof cause === 'object' &&
-      'message' in cause &&
-      typeof (cause as { message: unknown }).message === 'string'
-    )
+      cause
+      && typeof cause === 'object'
+      && 'message' in cause
+      && typeof (cause as { message: unknown }).message === 'string'
+    ) {
       return (cause as { message: string }).message;
+    }
   }
   return `The gateway returned HTTP ${status}.`;
 }
@@ -415,10 +425,11 @@ async function api(path: string, body?: unknown) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = await response.json();
-  if (!response.ok)
+  if (!response.ok) {
     throw new Error(
       typeof data.error === 'string' ? data.error : `Playground error ${response.status}`,
     );
+  }
   return data;
 }
 function record(label: string, status: number, body: unknown, show = true) {
@@ -430,12 +441,14 @@ function record(label: string, status: number, body: unknown, show = true) {
     activeEntry.value = 0;
     responseTab.value = 'body';
     copied.value = false;
-  } else if (activeEntry.value !== null) {
+  }
+  else if (activeEntry.value !== null) {
     activeEntry.value = activeEntry.value + 1 < entries.value.length ? activeEntry.value + 1 : null;
   }
 }
 async function copyResponse() {
-  if (!visibleEntry.value) return;
+  if (!visibleEntry.value)
+    return;
   await navigator.clipboard.writeText(JSON.stringify(visibleEntry.value.body, null, 2));
   copied.value = true;
   window.setTimeout(() => {
@@ -459,8 +472,10 @@ async function refreshHistory() {
     })) as { status: number; body: ListPage };
     if (currentMode === mode.value && currentClient === clientId.value)
       history.value = response.status === 200 ? response.body.items : [];
-  } catch {
-    if (currentMode === mode.value && currentClient === clientId.value) history.value = [];
+  }
+  catch {
+    if (currentMode === mode.value && currentClient === clientId.value)
+      history.value = [];
   }
 }
 function changeMode(next: Mode) {
@@ -480,7 +495,8 @@ async function execute(
   sentOperation: Operation,
   options?: { show?: boolean },
 ): Promise<Executed | null> {
-  if (!bootstrap.value || busy.value) return null;
+  if (!bootstrap.value || busy.value)
+    return null;
   error.value = '';
   const sentMode = mode.value;
   const sentClient = clientId.value;
@@ -491,7 +507,8 @@ async function execute(
     let metadata: unknown;
     try {
       metadata = JSON.parse(metadataText.value) as unknown;
-    } catch {
+    }
+    catch {
       error.value = 'Metadata must be a JSON object.';
       return null;
     }
@@ -509,12 +526,13 @@ async function execute(
       expiresInSeconds: Number(expiresInSeconds.value),
     };
   }
-  if (sentOperation === 'keyCreate')
+  if (sentOperation === 'keyCreate') {
     payload = {
       label: keyLabel.value,
       scopes: keyScopes.value,
       ...(keyExpiresAt.value ? { expiresAt: keyExpiresAt.value } : {}),
     };
+  }
   const show = options?.show !== false;
   try {
     busy.value = true;
@@ -532,20 +550,22 @@ async function execute(
       payload,
       ...(sentOperation === 'audit' ? { auditPage: auditFilters.value } : {}),
     })) as { status: number; body: Record<string, unknown> };
-    const current =
-      sentMode === mode.value &&
-      sentClient === clientId.value &&
-      (!['get', 'events', 'cancel', 'claim', 'result'].includes(sentOperation) ||
-        sentRequestId === requestId.value) &&
-      (sentOperation !== 'keyRevoke' || sentKeyId === keyId.value);
+    const current
+      = sentMode === mode.value
+        && sentClient === clientId.value
+        && (!['get', 'events', 'cancel', 'claim', 'result'].includes(sentOperation)
+          || sentRequestId === requestId.value)
+        && (sentOperation !== 'keyRevoke' || sentKeyId === keyId.value);
     record(
       `${sentOperation.toUpperCase()} · ${sentClient} · ${sentMode}`,
       response.status,
       response.body,
       show && current,
     );
-    if (!current) return null;
-    if (response.status >= 400) error.value = gatewayMessage(response.body, response.status);
+    if (!current)
+      return null;
+    if (response.status >= 400)
+      error.value = gatewayMessage(response.body, response.status);
     if (sentOperation === 'list')
       listPage.value = response.status === 200 ? (response.body as unknown as ListPage) : null;
     if (sentOperation === 'events')
@@ -565,20 +585,22 @@ async function execute(
       auditPage.value = null;
     }
     const viewBody = sentOperation === 'claim' ? response.body.request : response.body;
-    const armedDelivery =
-      failNextDelivery.value &&
-      sentMode === 'simulated' &&
-      sentOperation === 'create' &&
-      response.status === 201;
-    if (armedDelivery) failNextDelivery.value = false;
+    const armedDelivery
+      = failNextDelivery.value
+        && sentMode === 'simulated'
+        && sentOperation === 'create'
+        && response.status === 201;
+    if (armedDelivery)
+      failNextDelivery.value = false;
     if (
-      ['create', 'get', 'cancel', 'claim', 'result'].includes(sentOperation) &&
-      viewBody &&
-      typeof viewBody === 'object' &&
-      'id' in viewBody
+      ['create', 'get', 'cancel', 'claim', 'result'].includes(sentOperation)
+      && viewBody
+      && typeof viewBody === 'object'
+      && 'id' in viewBody
     ) {
       const item = viewBody as RequestView;
-      if (requestId.value !== item.id && sentOperation !== 'claim') claimToken.value = '';
+      if (requestId.value !== item.id && sentOperation !== 'claim')
+        claimToken.value = '';
       remember(item);
       requestId.value = item.id;
       if (sentOperation === 'create' && (response.status === 200 || response.status === 201)) {
@@ -586,8 +608,8 @@ async function execute(
         unavailable.value = false;
         blocked.value = false;
         view.value = 'approval';
-        createNotice.value =
-          response.status === 200
+        createNotice.value
+          = response.status === 200
             ? 'This idempotency key already exists for this client, so JaGate returned the original request.'
             : '';
       }
@@ -605,35 +627,46 @@ async function execute(
     if (['create', 'get', 'cancel', 'claim', 'result'].includes(sentOperation))
       await refreshHistory();
     return { status: response.status, body: response.body };
-  } catch (cause) {
+  }
+  catch (cause) {
     if (sentMode === mode.value && sentClient === clientId.value)
       error.value = cause instanceof Error ? cause.message : 'Request failed';
     return null;
-  } finally {
+  }
+  finally {
     busy.value = false;
   }
 }
 async function loadEvents() {
-  if (!requestId.value) return;
+  if (!requestId.value)
+    return;
   eventCursor.value = '';
   eventCursorStack.value = [];
   await execute('events', { show: false });
 }
 function reloadEvents() {
-  if (requestId.value && !composing.value) void loadEvents();
+  if (requestId.value && !composing.value)
+    void loadEvents();
 }
 async function openCurrent() {
   const ticket = ++openTicket;
   const id = requestId.value;
   const known = selected.value?.id === id;
-  if (!known) storyLoading.value = true;
-  while (busy.value && ticket === openTicket)
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  if (ticket !== openTicket || requestId.value !== id) return;
+  if (!known)
+    storyLoading.value = true;
+  while (busy.value) {
+    if (ticket !== openTicket)
+      break;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  if (ticket !== openTicket || requestId.value !== id)
+    return;
   const result = await execute('get', { show: false });
-  if (ticket !== openTicket || requestId.value !== id) return;
+  if (ticket !== openTicket || requestId.value !== id)
+    return;
   storyLoading.value = false;
-  if (result?.status === 200) await loadEvents();
+  if (result?.status === 200)
+    await loadEvents();
 }
 function selectFromInbox(item: RequestView) {
   sidebarSelection.value = item.id;
@@ -641,11 +674,13 @@ function selectFromInbox(item: RequestView) {
 }
 function clearSidebarSelection(event: Event) {
   const target = event.target;
-  if (target instanceof Element && target.closest('.inbox-list')) return;
+  if (target instanceof Element && target.closest('.inbox-list'))
+    return;
   sidebarSelection.value = '';
 }
 async function openRequest(item: RequestView) {
-  if (requestId.value !== item.id) claimToken.value = '';
+  if (requestId.value !== item.id)
+    claimToken.value = '';
   requestId.value = item.id;
   composing.value = false;
   unavailable.value = false;
@@ -657,7 +692,8 @@ async function openRequest(item: RequestView) {
 async function ask() {
   telegramReply.value = '';
   await execute('create');
-  if (!composing.value && requestId.value) await loadEvents();
+  if (!composing.value && requestId.value)
+    await loadEvents();
 }
 async function cancelRequest() {
   telegramReply.value = '';
@@ -669,7 +705,8 @@ async function claimApproval() {
   await loadEvents();
 }
 async function report(status: 'succeeded' | 'failed') {
-  if (!bootstrap.value || busy.value) return;
+  if (!bootstrap.value || busy.value)
+    return;
   const sentMode = mode.value;
   const sentClient = clientId.value;
   const sentRequestId = requestId.value;
@@ -685,47 +722,56 @@ async function report(status: 'succeeded' | 'failed') {
       requestId: sentRequestId,
       payload: { claimToken: claimToken.value, status, summary: resultSummary.value },
     })) as { status: number; body: Record<string, unknown> };
-    const current =
-      sentMode === mode.value && sentClient === clientId.value && sentRequestId === requestId.value;
+    const current
+      = sentMode === mode.value && sentClient === clientId.value && sentRequestId === requestId.value;
     record(`RESULT · ${sentClient} · ${sentMode}`, response.status, response.body, current);
-    if (!current) return;
-    if (response.status >= 400) error.value = gatewayMessage(response.body, response.status);
+    if (!current)
+      return;
+    if (response.status >= 400)
+      error.value = gatewayMessage(response.body, response.status);
     if (response.body && typeof response.body === 'object' && 'id' in response.body) {
       remember(response.body as RequestView);
       requestId.value = String(response.body.id);
     }
     await refreshHistory();
-  } catch (cause) {
+  }
+  catch (cause) {
     if (
-      sentMode === mode.value &&
-      sentClient === clientId.value &&
-      sentRequestId === requestId.value
-    )
+      sentMode === mode.value
+      && sentClient === clientId.value
+      && sentRequestId === requestId.value
+    ) {
       error.value = cause instanceof Error ? cause.message : 'Request failed';
-  } finally {
+    }
+  }
+  finally {
     busy.value = false;
   }
   await loadEvents();
 }
 async function nextPage() {
-  if (!listPage.value?.nextCursor || busy.value) return;
+  if (!listPage.value?.nextCursor || busy.value)
+    return;
   listCursorStack.value.push(listCursor.value);
   listCursor.value = listPage.value.nextCursor;
   await execute('list');
 }
 async function previousPage() {
-  if (!listCursorStack.value.length || busy.value) return;
+  if (!listCursorStack.value.length || busy.value)
+    return;
   listCursor.value = listCursorStack.value.pop()!;
   await execute('list');
 }
 async function nextEventPage() {
-  if (!eventPage.value?.nextCursor || busy.value) return;
+  if (!eventPage.value?.nextCursor || busy.value)
+    return;
   eventCursorStack.value.push(eventCursor.value);
   eventCursor.value = eventPage.value.nextCursor;
   await execute('events');
 }
 async function previousEventPage() {
-  if (!eventCursorStack.value.length || busy.value) return;
+  if (!eventCursorStack.value.length || busy.value)
+    return;
   eventCursor.value = eventCursorStack.value.pop()!;
   await execute('events');
 }
@@ -735,24 +781,28 @@ async function showKeys() {
   await execute('keyList');
 }
 async function nextKeyPage() {
-  if (!keyPage.value?.nextCursor || busy.value) return;
+  if (!keyPage.value?.nextCursor || busy.value)
+    return;
   keyCursorStack.value.push(keyCursor.value);
   keyCursor.value = keyPage.value.nextCursor;
   await execute('keyList');
 }
 async function previousKeyPage() {
-  if (!keyCursorStack.value.length || busy.value) return;
+  if (!keyCursorStack.value.length || busy.value)
+    return;
   keyCursor.value = keyCursorStack.value.pop()!;
   await execute('keyList');
 }
 async function issueKey() {
   const result = await execute('keyCreate');
-  if (result?.status === 201) await execute('keyList', { show: false });
+  if (result?.status === 201)
+    await execute('keyList', { show: false });
 }
 async function revokeKey(id: string) {
   keyId.value = id;
   const result = await execute('keyRevoke');
-  if (result?.status === 200) await execute('keyList', { show: false });
+  if (result?.status === 200)
+    await execute('keyList', { show: false });
 }
 async function showAudit() {
   auditCursor.value = '';
@@ -760,13 +810,15 @@ async function showAudit() {
   await execute('audit');
 }
 async function nextAuditPage() {
-  if (!auditPage.value?.nextCursor || busy.value) return;
+  if (!auditPage.value?.nextCursor || busy.value)
+    return;
   auditCursorStack.value.push(auditCursor.value);
   auditCursor.value = auditPage.value.nextCursor;
   await execute('audit');
 }
 async function previousAuditPage() {
-  if (!auditCursorStack.value.length || busy.value) return;
+  if (!auditCursorStack.value.length || busy.value)
+    return;
   auditCursor.value = auditCursorStack.value.pop()!;
   await execute('audit');
 }
@@ -808,7 +860,8 @@ function auditLabel(type: string): string {
   );
 }
 async function decide(decision: 'approve' | 'reject') {
-  if (busy.value || !requestId.value) return;
+  if (busy.value || !requestId.value)
+    return;
   error.value = '';
   const sentMode = mode.value;
   const sentClient = clientId.value;
@@ -821,27 +874,33 @@ async function decide(decision: 'approve' | 'reject') {
       decision,
       actor: actor.value,
     })) as { message?: string; request: RequestView };
-    const current =
-      sentMode === mode.value && sentClient === clientId.value && sentRequestId === requestId.value;
+    const current
+      = sentMode === mode.value && sentClient === clientId.value && sentRequestId === requestId.value;
     record(`${decision.toUpperCase()} · ${sentClient} · ${sentMode}`, 200, response, current);
-    if (!current) return;
+    if (!current)
+      return;
     telegramReply.value = response.message ?? '';
-    if (response.request) remember(response.request);
+    if (response.request)
+      remember(response.request);
     await refreshHistory();
-  } catch (cause) {
+  }
+  catch (cause) {
     if (
-      sentMode === mode.value &&
-      sentClient === clientId.value &&
-      sentRequestId === requestId.value
-    )
+      sentMode === mode.value
+      && sentClient === clientId.value
+      && sentRequestId === requestId.value
+    ) {
       error.value = cause instanceof Error ? cause.message : 'Decision failed';
-  } finally {
+    }
+  }
+  finally {
     busy.value = false;
   }
   await loadEvents();
 }
 async function advanceTime() {
-  if (busy.value) return;
+  if (busy.value)
+    return;
   error.value = '';
   const sentMode = mode.value;
   const sentClient = clientId.value;
@@ -853,69 +912,85 @@ async function advanceTime() {
       simulatedClockOffset.value = Date.parse((response as { now: string }).now) - Date.now();
     const current = sentMode === mode.value && sentClient === clientId.value;
     record(`ADVANCE CLOCK · ${sentClient} · ${sentMode}`, 200, response, current);
-    if (!current) return;
+    if (!current)
+      return;
     await refreshHistory();
-  } catch (cause) {
+  }
+  catch (cause) {
     if (sentMode === mode.value && sentClient === clientId.value)
       error.value = cause instanceof Error ? cause.message : 'Clock change failed';
-  } finally {
+  }
+  finally {
     busy.value = false;
   }
-  if (openId && requestId.value === openId && !composing.value) await openCurrent();
+  if (openId && requestId.value === openId && !composing.value)
+    await openCurrent();
 }
 async function armDeliveryFailure() {
-  if (busy.value || failNextDelivery.value) return;
+  if (busy.value || failNextDelivery.value)
+    return;
   error.value = '';
   try {
     busy.value = true;
     const response = (await api('/api/fail-next-delivery', {})) as { armed: boolean };
     failNextDelivery.value = response.armed;
-  } catch (cause) {
+  }
+  catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Could not arm the delivery failure';
-  } finally {
+  }
+  finally {
     busy.value = false;
   }
 }
 function onScopeChange(scope: ClientKeyScope, event: Event) {
   const target = event.target;
-  if (!(target instanceof HTMLInputElement)) return;
+  if (!(target instanceof HTMLInputElement))
+    return;
   keyScopes.value = target.checked
     ? [...new Set([...keyScopes.value, scope])]
-    : keyScopes.value.filter((item) => item !== scope);
+    : keyScopes.value.filter(item => item !== scope);
 }
 function statusClass(status: string) {
   if (
-    status === 'approved' ||
-    status === 'succeeded' ||
-    status.includes('succeeded') ||
-    status.includes('approved') ||
-    status.includes('delivered')
-  )
+    status === 'approved'
+    || status === 'succeeded'
+    || status.includes('succeeded')
+    || status.includes('approved')
+    || status.includes('delivered')
+  ) {
     return 'ok';
+  }
   if (
-    status === 'rejected' ||
-    status === 'failed' ||
-    status === 'cancelled' ||
-    status.includes('failed') ||
-    status.includes('rejected') ||
-    status.includes('cancelled')
-  )
+    status === 'rejected'
+    || status === 'failed'
+    || status === 'cancelled'
+    || status.includes('failed')
+    || status.includes('rejected')
+    || status.includes('cancelled')
+  ) {
     return 'bad';
-  if (status === 'pending' || status.includes('retry')) return 'wait';
-  if (status === 'expired' || status.includes('expired')) return 'expired';
+  }
+  if (status === 'pending' || status.includes('retry'))
+    return 'wait';
+  if (status === 'expired' || status.includes('expired'))
+    return 'expired';
   return 'idle';
 }
 function keyState(item: ClientKeyView) {
-  if (item.revokedAt) return 'Revoked';
+  if (item.revokedAt)
+    return 'Revoked';
   const now = Date.now() + (mode.value === 'simulated' ? simulatedClockOffset.value : 0);
-  if (item.expiresAt && Date.parse(item.expiresAt) <= now) return 'Expired';
+  if (item.expiresAt && Date.parse(item.expiresAt) <= now)
+    return 'Expired';
   return 'Active';
 }
 function deliveryLine(item: RequestView) {
-  if (item.deliveryStatus === 'delivered') return 'Delivered to this client’s Telegram chat.';
+  if (item.deliveryStatus === 'delivered')
+    return 'Delivered to this client’s Telegram chat.';
   if (item.deliveryStatus === 'failed')
     return item.deliveryError || 'Delivery failed, so a decision cannot be recorded yet.';
-  if (item.deliveryStatus === 'retrying') return 'Delivery is retrying.';
+  if (item.deliveryStatus === 'retrying')
+    return 'Delivery is retrying.';
   return 'Waiting for Telegram delivery.';
 }
 
@@ -924,13 +999,15 @@ onMounted(async () => {
   document.addEventListener('focusin', clearSidebarSelection);
   try {
     const response = await fetch('/api/bootstrap');
-    if (!response.ok) throw new Error('Could not start the playground');
+    if (!response.ok)
+      throw new Error('Could not start the playground');
     bootstrap.value = (await response.json()) as Bootstrap;
     const simulatedNow = Date.parse(bootstrap.value.simulatedNow);
     simulatedClockOffset.value = Number.isFinite(simulatedNow) ? simulatedNow - Date.now() : 0;
     failNextDelivery.value = bootstrap.value.failNextDelivery === true;
     clientId.value = bootstrap.value.simulatedClients[0] ?? '';
-  } catch (cause) {
+  }
+  catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Could not start the playground';
   }
 });
@@ -945,7 +1022,7 @@ onUnmounted(() => {
     <header class="chrome">
       <div class="topbar">
         <div class="brand">
-          <img src="/logo.svg" alt="" width="28" height="28" />
+          <img src="/logo.svg" alt="" width="28" height="28">
           JaGate <span>Playground</span>
         </div>
         <div class="top-links">
@@ -953,18 +1030,15 @@ onUnmounted(() => {
             href="https://github.com/ahmetomerv/JaGate/blob/main/docs/guide/playground.md"
             target="_blank"
             rel="noreferrer"
-            >Usage guide</a
-          >
+          >Usage guide</a>
         </div>
       </div>
       <div class="environment">
         <label class="environment-field">
-          <span class="field-label"
-            >Environment
+          <span class="field-label">Environment
             <span class="mode-note">{{
               mode === 'simulated' ? 'Local simulator · isolated database' : bootstrap?.gatewayUrl
-            }}</span></span
-          >
+            }}</span></span>
           <select v-model="modeSelection" aria-label="Environment">
             <option value="simulated">Simulated Telegram</option>
             <option value="live">Real gateway</option>
@@ -998,7 +1072,7 @@ onUnmounted(() => {
             autocomplete="off"
             spellcheck="false"
             placeholder="Paste the key returned once"
-          />
+          >
           <button
             type="button"
             :aria-label="showScopedKey ? 'Hide issued key' : 'Show issued key'"
@@ -1015,12 +1089,16 @@ onUnmounted(() => {
         <button type="button" :aria-pressed="view === 'list'" @click="view = 'list'">
           All requests
         </button>
-        <button type="button" :aria-pressed="view === 'keys'" @click="view = 'keys'">Keys</button>
+        <button type="button" :aria-pressed="view === 'keys'" @click="view = 'keys'">
+          Keys
+        </button>
         <button type="button" :aria-pressed="view === 'gateway'" @click="view = 'gateway'">
           Gateway
         </button>
       </nav>
-      <p v-if="error" class="notice" role="alert">{{ error }}</p>
+      <p v-if="error" class="notice" role="alert">
+        {{ error }}
+      </p>
       <p v-if="mode === 'live' && !clients.length" class="notice warn">
         Live mode needs CLIENT_KEYS in your local .env and a running gateway.
       </p>
@@ -1030,10 +1108,16 @@ onUnmounted(() => {
       <aside v-if="view === 'approval'" class="inbox">
         <div class="inbox-head">
           <span>This client</span>
-          <button type="button" :disabled="busy" @click="refreshHistory">Refresh</button>
+          <button type="button" :disabled="busy" @click="refreshHistory">
+            Refresh
+          </button>
         </div>
-        <button type="button" class="new-approval" @click="newApproval">New approval</button>
-        <p v-if="!history.length" class="hint">Approvals for this client will show up here.</p>
+        <button type="button" class="new-approval" @click="newApproval">
+          New approval
+        </button>
+        <p v-if="!history.length" class="hint">
+          Approvals for this client will show up here.
+        </p>
         <div class="inbox-list">
           <button
             v-for="item in history"
@@ -1043,11 +1127,7 @@ onUnmounted(() => {
             @click="selectFromInbox(item)"
           >
             <span class="inbox-title">{{ item.title }}</span>
-            <span class="inbox-meta"
-              ><span class="dot" :class="statusClass(item.status)"></span
-              ><span class="inbox-id">{{ item.id.slice(0, 8) }}</span
-              ><span class="status-word">{{ item.status }}</span></span
-            >
+            <span class="inbox-meta"><span class="dot" :class="statusClass(item.status)" /><span class="inbox-id">{{ item.id.slice(0, 8) }}</span><span class="status-word">{{ item.status }}</span></span>
           </button>
         </div>
       </aside>
@@ -1059,8 +1139,7 @@ onUnmounted(() => {
           application performs the action.
         </p>
         <p v-else-if="clientId" class="intro">
-          This client calls <code>{{ bootstrap?.gatewayUrl }}</code
-          >. A person decides in its Telegram chat, then the application claims the approval and
+          This client calls <code>{{ bootstrap?.gatewayUrl }}</code>. A person decides in its Telegram chat, then the application claims the approval and
           reports what it did.
         </p>
 
@@ -1072,18 +1151,16 @@ onUnmounted(() => {
               that person sees in Telegram.
             </p>
             <div class="fields">
-              <label class="span-2">Title<input v-model="title" maxlength="100" /></label>
-              <label class="span-2"
-                >Description<textarea v-model="description" rows="3" maxlength="1000"></textarea>
+              <label class="span-2">Title<input v-model="title" maxlength="100"></label>
+              <label class="span-2">Description<textarea v-model="description" rows="3" maxlength="1000" />
               </label>
-              <label>Action<input v-model="action" maxlength="64" spellcheck="false" /></label>
-              <label
-                >Open for (seconds)<input
-                  v-model.number="expiresInSeconds"
-                  type="number"
-                  min="60"
-                  max="86400"
-              /></label>
+              <label>Action<input v-model="action" maxlength="64" spellcheck="false"></label>
+              <label>Open for (seconds)<input
+                v-model.number="expiresInSeconds"
+                type="number"
+                min="60"
+                max="86400"
+              ></label>
             </div>
             <div class="detail-block">
               <div class="section-row">
@@ -1093,20 +1170,21 @@ onUnmounted(() => {
                 </button>
               </div>
               <div v-for="(row, index) in detailRows" :key="index" class="detail-row">
-                <label>Label<input v-model="row.label" maxlength="40" /></label>
-                <label>Value<input v-model="row.value" maxlength="160" /></label>
-                <button type="button" @click="removeDetail(index)">Remove</button>
+                <label>Label<input v-model="row.label" maxlength="40"></label>
+                <label>Value<input v-model="row.value" maxlength="160"></label>
+                <button type="button" @click="removeDetail(index)">
+                  Remove
+                </button>
               </div>
             </div>
             <div class="key-line">
-              <label for="idempotency-key"
-                >Idempotency key<input
-                  id="idempotency-key"
-                  v-model="idempotencyKey"
-                  maxlength="128"
-                  spellcheck="false"
-              /></label>
-              <button type="button" @click="idempotencyKey = 'playground:' + Date.now()">
+              <label for="idempotency-key">Idempotency key<input
+                id="idempotency-key"
+                v-model="idempotencyKey"
+                maxlength="128"
+                spellcheck="false"
+              ></label>
+              <button type="button" @click="idempotencyKey = `playground:${Date.now()}`">
                 New key
               </button>
               <p class="hint">
@@ -1116,12 +1194,11 @@ onUnmounted(() => {
             </div>
             <details class="extra">
               <summary>Metadata, stored with the request and omitted from Telegram</summary>
-              <label
-                >Metadata JSON<textarea
-                  v-model="metadataText"
-                  rows="3"
-                  spellcheck="false"
-                ></textarea>
+              <label>Metadata JSON<textarea
+                v-model="metadataText"
+                rows="3"
+                spellcheck="false"
+              />
               </label>
               <pre><code>{{ JSON.stringify(requestPreview, null, 2) }}</code></pre>
             </details>
@@ -1149,7 +1226,9 @@ onUnmounted(() => {
           </section>
 
           <section v-else-if="!selected && (storyLoading || !unavailable)" class="card">
-            <p class="hint">Loading this approval…</p>
+            <p class="hint">
+              Loading this approval…
+            </p>
           </section>
 
           <section v-else-if="unavailable || !selected" class="card">
@@ -1164,7 +1243,9 @@ onUnmounted(() => {
               Each client only reads the approvals it created. Switch back to the owning client, or
               start another approval.
             </p>
-            <button type="button" @click="newApproval">New approval</button>
+            <button type="button" @click="newApproval">
+              New approval
+            </button>
           </section>
 
           <template v-else>
@@ -1173,7 +1254,9 @@ onUnmounted(() => {
                 <h1>{{ selected.title }}</h1>
                 <code>{{ selected.id.slice(0, 8) }}</code>
               </div>
-              <p v-if="createNotice" class="hint">{{ createNotice }}</p>
+              <p v-if="createNotice" class="hint">
+                {{ createNotice }}
+              </p>
               <div class="facts">
                 <span><small>Decision</small>{{ selected.status }}</span>
                 <span><small>Delivery</small>{{ selected.deliveryStatus }}</span>
@@ -1183,7 +1266,9 @@ onUnmounted(() => {
 
             <div class="stages">
               <section class="stage done">
-                <div class="stage-rail"><span>1</span></div>
+                <div class="stage-rail">
+                  <span>1</span>
+                </div>
                 <div class="stage-body">
                   <h2>The application asked</h2>
                   <p>{{ selected.description }}</p>
@@ -1209,7 +1294,9 @@ onUnmounted(() => {
               </section>
 
               <section class="stage" :class="stageClass('decide')">
-                <div class="stage-rail"><span>2</span></div>
+                <div class="stage-rail">
+                  <span>2</span>
+                </div>
                 <div class="stage-body">
                   <h2>A person decides in Telegram</h2>
                   <div class="chat" aria-label="Simulated chat">
@@ -1233,11 +1320,11 @@ onUnmounted(() => {
                           </p>
                           <p class="message-meta">
                             Client {{ selected.clientId }} · {{ selected.action }} ·
-                            {{ selected.id.slice(0, 8) }}<br />Expires
+                            {{ selected.id.slice(0, 8) }}<br>Expires
                             {{ new Date(selected.expiresAt).toLocaleString()
-                            }}<template v-if="selected.status !== 'pending'"
-                              ><br />Status {{ selected.status }}</template
-                            >
+                            }}<template v-if="selected.status !== 'pending'">
+                              <br>Status {{ selected.status }}
+                            </template>
                           </p>
                         </div>
                         <div
@@ -1262,12 +1349,13 @@ onUnmounted(() => {
                       </div>
                       <div v-if="telegramReply" class="message">
                         <span class="sender">JaGate</span>
-                        <p class="bubble reply" aria-live="polite">{{ telegramReply }}</p>
+                        <p class="bubble reply" aria-live="polite">
+                          {{ telegramReply }}
+                        </p>
                       </div>
                     </div>
                     <div v-if="mode === 'simulated'" class="pressing">
-                      <label
-                        >Pressing as
+                      <label>Pressing as
                         <select v-model="actor" aria-label="Who presses the button">
                           <option value="allowed">Allowlisted approver</option>
                           <option value="outsider">Someone else</option>
@@ -1278,7 +1366,9 @@ onUnmounted(() => {
                       <p class="hint">
                         Approve or reject in this client’s Telegram chat, then refresh.
                       </p>
-                      <button type="button" :disabled="busy" @click="openCurrent">Refresh</button>
+                      <button type="button" :disabled="busy" @click="openCurrent">
+                        Refresh
+                      </button>
                     </div>
                   </div>
                   <div v-if="mode === 'simulated'" class="clock">
@@ -1287,14 +1377,13 @@ onUnmounted(() => {
                       clock passes its deadline. An approval already recorded stays approved.
                     </p>
                     <div class="clock-row">
-                      <label
-                        >Seconds<input
-                          v-model.number="advanceSeconds"
-                          type="number"
-                          min="1"
-                          max="86400"
-                          aria-label="Seconds to move the clock"
-                      /></label>
+                      <label>Seconds<input
+                        v-model.number="advanceSeconds"
+                        type="number"
+                        min="1"
+                        max="86400"
+                        aria-label="Seconds to move the clock"
+                      ></label>
                       <button type="button" :disabled="busy" @click="advanceTime">
                         Move the clock forward
                       </button>
@@ -1304,7 +1393,9 @@ onUnmounted(() => {
               </section>
 
               <section class="stage" :class="stageClass('act')">
-                <div class="stage-rail"><span>3</span></div>
+                <div class="stage-rail">
+                  <span>3</span>
+                </div>
                 <div class="stage-body">
                   <h2>The application continues</h2>
                   <template v-if="selected.status !== 'approved'">
@@ -1325,9 +1416,9 @@ onUnmounted(() => {
                   <template v-else>
                     <p v-if="selected.resultAt">
                       Reported {{ selected.executionStatus
-                      }}<template v-if="selected.resultSummary"
-                        >: {{ selected.resultSummary }}</template
-                      >.
+                      }}<template v-if="selected.resultSummary">
+                        : {{ selected.resultSummary }}
+                      </template>.
                     </p>
                     <p v-else>
                       Claimed. The application performs the action, then reports succeeded or
@@ -1341,7 +1432,7 @@ onUnmounted(() => {
                         :type="showClaimToken ? 'text' : 'password'"
                         autocomplete="off"
                         placeholder="Filled after a successful claim"
-                      />
+                      >
                       <button
                         type="button"
                         :aria-label="showClaimToken ? 'Hide claim token' : 'Show claim token'"
@@ -1350,7 +1441,7 @@ onUnmounted(() => {
                         {{ showClaimToken ? 'Hide' : 'Show' }}
                       </button>
                     </div>
-                    <label>Summary<input v-model="resultSummary" maxlength="300" /></label>
+                    <label>Summary<input v-model="resultSummary" maxlength="300"></label>
                     <div class="chat-actions">
                       <button
                         type="button"
@@ -1379,38 +1470,38 @@ onUnmounted(() => {
               </section>
 
               <section class="stage" :class="stageClass('record')">
-                <div class="stage-rail"><span>4</span></div>
+                <div class="stage-rail">
+                  <span>4</span>
+                </div>
                 <div class="stage-body">
                   <h2>Request history</h2>
-                  <p v-if="!eventPage" class="hint">Loading the timeline…</p>
-                  <p v-else-if="!eventPage.items.length" class="hint">No events on this page.</p>
+                  <p v-if="!eventPage" class="hint">
+                    Loading the timeline…
+                  </p>
+                  <p v-else-if="!eventPage.items.length" class="hint">
+                    No events on this page.
+                  </p>
                   <ol v-else class="timeline">
                     <li v-for="event in eventPage.items" :key="event.sequence">
-                      <span class="dot" :class="statusClass(event.type)"></span>
+                      <span class="dot" :class="statusClass(event.type)" />
                       <div>
                         <strong>{{ eventLabel(event.type) }}</strong>
-                        <small
-                          >#{{ event.sequence }} ·
+                        <small>#{{ event.sequence }} ·
                           <time :datetime="event.occurredAt">{{
                             new Date(event.occurredAt).toLocaleString()
-                          }}</time
-                          ><template v-if="event.actorId"> · Approver {{ event.actorId }}</template
-                          ><template v-if="event.attempt">
-                            · Attempt {{ event.attempt }}</template
-                          ></small
-                        >
+                          }}</time><template v-if="event.actorId"> · Approver {{ event.actorId }}</template><template v-if="event.attempt">
+                            · Attempt {{ event.attempt }}</template></small>
                       </div>
                     </li>
                   </ol>
                   <div class="pager">
-                    <label
-                      >Events per page<input
-                        v-model.number="eventLimit"
-                        type="number"
-                        min="1"
-                        max="100"
-                        @change="reloadEvents"
-                    /></label>
+                    <label>Events per page<input
+                      v-model.number="eventLimit"
+                      type="number"
+                      min="1"
+                      max="100"
+                      @change="reloadEvents"
+                    ></label>
                     <span>Page {{ eventCursorStack.length + 1 }}</span>
                     <div class="chat-actions">
                       <button
@@ -1453,14 +1544,13 @@ onUnmounted(() => {
             <button type="button" :disabled="busy" @click="applyAttention('all')">
               Clear filters
             </button>
-            <label
-              >Window (minutes)<input
-                v-model.number="attentionMinutes"
-                type="number"
-                min="1"
-                max="1440"
-                aria-label="Attention window in minutes"
-            /></label>
+            <label>Window (minutes)<input
+              v-model.number="attentionMinutes"
+              type="number"
+              min="1"
+              max="1440"
+              aria-label="Attention window in minutes"
+            ></label>
           </div>
           <p class="hint">
             Failed delivery lists pending requests whose Telegram message failed. Old claims are
@@ -1469,8 +1559,7 @@ onUnmounted(() => {
             page.
           </p>
           <div class="fields">
-            <label
-              >Decision
+            <label>Decision
               <select v-model="listStatus" aria-label="Decision">
                 <option value="">Any</option>
                 <option value="pending">Pending</option>
@@ -1480,8 +1569,7 @@ onUnmounted(() => {
                 <option value="cancelled">Cancelled</option>
               </select>
             </label>
-            <label
-              >Delivery
+            <label>Delivery
               <select v-model="listDeliveryStatus" aria-label="Delivery">
                 <option value="">Any</option>
                 <option value="pending">Pending</option>
@@ -1490,8 +1578,7 @@ onUnmounted(() => {
                 <option value="failed">Failed</option>
               </select>
             </label>
-            <label
-              >Application
+            <label>Application
               <select v-model="listExecutionStatus" aria-label="Application">
                 <option value="">Any</option>
                 <option value="unclaimed">Unclaimed</option>
@@ -1500,29 +1587,25 @@ onUnmounted(() => {
                 <option value="failed">Failed</option>
               </select>
             </label>
-            <label
-              >Page size<input v-model.number="listLimit" type="number" min="1" max="100"
-            /></label>
-            <label
-              >Claimed before <span class="muted">UTC</span
-              ><input
-                v-model.trim="listClaimedBefore"
-                placeholder="UTC timestamp"
-                spellcheck="false"
-            /></label>
-            <label
-              >Expires before <span class="muted">UTC</span
-              ><input
-                v-model.trim="listExpiresBefore"
-                placeholder="UTC timestamp"
-                spellcheck="false"
-            /></label>
+            <label>Page size<input v-model.number="listLimit" type="number" min="1" max="100"></label>
+            <label>Claimed before <span class="muted">UTC</span><input
+              v-model.trim="listClaimedBefore"
+              placeholder="UTC timestamp"
+              spellcheck="false"
+            ></label>
+            <label>Expires before <span class="muted">UTC</span><input
+              v-model.trim="listExpiresBefore"
+              placeholder="UTC timestamp"
+              spellcheck="false"
+            ></label>
           </div>
           <button type="button" :disabled="busy || !clientId" @click="showRequests">
             Show these requests
           </button>
           <div v-if="listPage" class="result-list">
-            <p v-if="!listPage.items.length" class="hint">No requests match these filters.</p>
+            <p v-if="!listPage.items.length" class="hint">
+              No requests match these filters.
+            </p>
             <button
               v-for="item in listPage.items"
               :key="item.id"
@@ -1530,12 +1613,7 @@ onUnmounted(() => {
               class="row-button"
               @click="openRequest(item)"
             >
-              <span class="row-copy"
-                ><strong>{{ item.title }}</strong
-                ><small
-                  >{{ item.status }} · {{ item.deliveryStatus }} · {{ item.executionStatus }}</small
-                ><small>{{ new Date(item.createdAt).toLocaleString() }}</small></span
-              >
+              <span class="row-copy"><strong>{{ item.title }}</strong><small>{{ item.status }} · {{ item.deliveryStatus }} · {{ item.executionStatus }}</small><small>{{ new Date(item.createdAt).toLocaleString() }}</small></span>
             </button>
             <div class="pager">
               <span>Page {{ listCursorStack.length + 1 }}</span>
@@ -1562,31 +1640,29 @@ onUnmounted(() => {
             operations you allow, and it cannot issue keys or read the audit log.
           </p>
           <div class="fields">
-            <label class="span-2"
-              >Name<input v-model="keyLabel" maxlength="80" placeholder="Name the app or worker"
-            /></label>
-            <label class="span-2"
-              >Expires at <span class="muted">optional UTC</span
-              ><input
-                v-model.trim="keyExpiresAt"
-                placeholder="Leave empty for no expiry"
-                spellcheck="false"
-            /></label>
+            <label class="span-2">Name<input v-model="keyLabel" maxlength="80" placeholder="Name the app or worker"></label>
+            <label class="span-2">Expires at <span class="muted">optional UTC</span><input
+              v-model.trim="keyExpiresAt"
+              placeholder="Leave empty for no expiry"
+              spellcheck="false"
+            ></label>
           </div>
           <div class="chat-actions">
-            <button type="button" @click="setKeyExpiryOneHour">Expire in 1 hour</button>
-            <button type="button" @click="keyExpiresAt = ''">No expiry</button>
+            <button type="button" @click="setKeyExpiryOneHour">
+              Expire in 1 hour
+            </button>
+            <button type="button" @click="keyExpiresAt = ''">
+              No expiry
+            </button>
           </div>
           <fieldset>
             <legend>This key may</legend>
             <div class="scopes">
-              <label v-for="scope in availableKeyScopes" :key="scope"
-                ><input
-                  type="checkbox"
-                  :checked="keyScopes.includes(scope)"
-                  @change="onScopeChange(scope, $event)"
-                />{{ scopeLabels[scope] }} <span class="muted">{{ scope }}</span></label
-              >
+              <label v-for="scope in availableKeyScopes" :key="scope"><input
+                type="checkbox"
+                :checked="keyScopes.includes(scope)"
+                @change="onScopeChange(scope, $event)"
+              >{{ scopeLabels[scope] }} <span class="muted">{{ scope }}</span></label>
             </div>
           </fieldset>
           <button type="button" :disabled="busy || !clientId || auth !== 'valid'" @click="issueKey">
@@ -1605,7 +1681,7 @@ onUnmounted(() => {
                 :type="showScopedKey ? 'text' : 'password'"
                 autocomplete="off"
                 spellcheck="false"
-              />
+              >
               <button
                 type="button"
                 :aria-label="showScopedKey ? 'Hide issued key' : 'Show issued key'"
@@ -1614,36 +1690,37 @@ onUnmounted(() => {
                 {{ showScopedKey ? 'Hide' : 'Show' }}
               </button>
             </div>
-            <button type="button" @click="useIssuedKey">Call as this key</button>
+            <button type="button" @click="useIssuedKey">
+              Call as this key
+            </button>
           </div>
           <div class="section-row">
             <h2>Issued keys</h2>
-            <button type="button" :disabled="busy || !clientId" @click="showKeys">Show keys</button>
+            <button type="button" :disabled="busy || !clientId" @click="showKeys">
+              Show keys
+            </button>
           </div>
           <p class="hint">
             Secret values are never listed. Revocation takes effect on the next call. The bootstrap
             key is rotated in .env.
           </p>
-          <label
-            >Page size<input
-              v-model.number="keyLimit"
-              type="number"
-              min="1"
-              max="100"
-              aria-label="Key page size"
-          /></label>
+          <label>Page size<input
+            v-model.number="keyLimit"
+            type="number"
+            min="1"
+            max="100"
+            aria-label="Key page size"
+          ></label>
           <div v-if="keyPage" class="result-list">
-            <p v-if="!keyPage.items.length" class="hint">No issued keys on this page.</p>
+            <p v-if="!keyPage.items.length" class="hint">
+              No issued keys on this page.
+            </p>
             <div v-for="item in keyPage.items" :key="item.id" class="key-row">
-              <span class="row-copy"
-                ><strong>{{ item.label }}</strong
-                ><small>{{ item.scopes.join(', ') }}</small
-                ><small>{{
-                  item.expiresAt
-                    ? 'Expires ' + new Date(item.expiresAt).toLocaleString()
-                    : 'No expiry'
-                }}</small></span
-              >
+              <span class="row-copy"><strong>{{ item.label }}</strong><small>{{ item.scopes.join(', ') }}</small><small>{{
+                item.expiresAt
+                  ? `Expires ${new Date(item.expiresAt).toLocaleString()}`
+                  : 'No expiry'
+              }}</small></span>
               <span class="muted">{{ keyState(item) }}</span>
               <button
                 type="button"
@@ -1684,40 +1761,37 @@ onUnmounted(() => {
             cannot read this list.
           </p>
           <div class="fields">
-            <label
-              >Page size<input
-                v-model.number="auditLimit"
-                type="number"
-                min="1"
-                max="100"
-                aria-label="Audit page size"
-            /></label>
-            <label
-              >Request id<input
-                v-model.trim="auditRequestId"
-                placeholder="Filter by request"
-                spellcheck="false"
-            /></label>
-            <label class="span-2"
-              >Key id<input
-                v-model.trim="auditKeyId"
-                placeholder="Actor or affected key"
-                spellcheck="false"
-            /></label>
+            <label>Page size<input
+              v-model.number="auditLimit"
+              type="number"
+              min="1"
+              max="100"
+              aria-label="Audit page size"
+            ></label>
+            <label>Request id<input
+              v-model.trim="auditRequestId"
+              placeholder="Filter by request"
+              spellcheck="false"
+            ></label>
+            <label class="span-2">Key id<input
+              v-model.trim="auditKeyId"
+              placeholder="Actor or affected key"
+              spellcheck="false"
+            ></label>
           </div>
           <div v-if="auditPage" class="result-list">
-            <p v-if="!auditPage.items.length" class="hint">No audit events match these filters.</p>
+            <p v-if="!auditPage.items.length" class="hint">
+              No audit events match these filters.
+            </p>
             <div v-for="event in auditPage.items" :key="event.id" class="row-copy audit-row">
               <strong>{{ auditLabel(event.type) }}</strong>
-              <small
-                ><time :datetime="event.occurredAt">{{
-                  new Date(event.occurredAt).toLocaleString()
-                }}</time>
+              <small><time :datetime="event.occurredAt">{{
+                new Date(event.occurredAt).toLocaleString()
+              }}</time>
                 ·
                 {{
-                  event.actor === 'bootstrap' ? 'Bootstrap key' : 'Issued key ' + event.actorKeyId
-                }}</small
-              >
+                  event.actor === 'bootstrap' ? 'Bootstrap key' : `Issued key ${event.actorKeyId}`
+                }}</small>
               <small v-if="event.requestId">Request {{ event.requestId }}</small>
               <small v-if="event.subjectKeyId">Key {{ event.subjectKeyId }}</small>
             </div>
@@ -1749,7 +1823,9 @@ onUnmounted(() => {
             Health and readiness are public. They answer even when Calling as is missing or invalid.
           </p>
           <div class="gateway-actions">
-            <button type="button" :disabled="busy" @click="execute('health')">Check health</button>
+            <button type="button" :disabled="busy" @click="execute('health')">
+              Check health
+            </button>
             <button type="button" :disabled="busy" @click="execute('ready')">
               Check readiness
             </button>
@@ -1767,11 +1843,8 @@ onUnmounted(() => {
               <strong
                 v-if="visibleEntry"
                 :class="visibleEntry.status >= 400 ? 'status-bad' : 'status-ok'"
-                >HTTP {{ visibleEntry.status }}</strong
-              >
-              <span class="disclosure"
-                ><span class="when-closed">Show</span><span class="when-open">Hide</span></span
-              >
+              >HTTP {{ visibleEntry.status }}</strong>
+              <span class="disclosure"><span class="when-closed">Show</span><span class="when-open">Hide</span></span>
             </span>
           </summary>
           <div class="editor-bar">
@@ -1803,7 +1876,9 @@ onUnmounted(() => {
           </div>
           <div v-if="responseTab === 'body'">
             <template v-if="visibleEntry">
-              <p class="hint">{{ visibleEntry.label }} · {{ visibleEntry.time }}</p>
+              <p class="hint">
+                {{ visibleEntry.label }} · {{ visibleEntry.time }}
+              </p>
               <pre><code>{{ JSON.stringify(visibleEntry.body, null, 2) }}</code></pre>
             </template>
           </div>

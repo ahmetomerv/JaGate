@@ -1,7 +1,7 @@
 import { parseConfig } from './config.js';
-import { openDatabase } from './storage.js';
 import { GatewayCore } from './core.js';
 import { createHttpServer } from './http.js';
+import { openDatabase } from './storage.js';
 import { HttpTelegramTransport, TelegramGateway } from './telegram.js';
 
 const config = parseConfig(process.env);
@@ -12,7 +12,7 @@ const telegram = new TelegramGateway(
   core,
   new HttpTelegramTransport(config.TELEGRAM_BOT_TOKEN),
   config.routes,
-  (message) => console.error(message),
+  message => console.error(message),
 );
 const app = createHttpServer(core, config.clientKeys, () => telegram.isReady());
 
@@ -20,7 +20,8 @@ try {
   await telegram.start();
   await app.listen({ host: config.HOST, port: config.PORT });
   console.info(`JaGate listening on ${config.HOST}:${config.PORT}`);
-} catch (error) {
+}
+catch (error) {
   console.error(error instanceof Error ? error.message : 'Startup failed');
   await telegram.stop();
   db.close();

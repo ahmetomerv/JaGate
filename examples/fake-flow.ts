@@ -1,8 +1,10 @@
-import { openDatabase } from '../src/storage.js';
-import { GatewayCore, type DeliveryJob } from '../src/core.js';
-import { createHttpServer } from '../src/http.js';
+import type { DeliveryJob } from '../src/core.js';
+import type { TelegramTransport, Update } from '../src/telegram.js';
 import { ApprovalClient } from '../src/client.js';
-import { TelegramGateway, type TelegramTransport, type Update } from '../src/telegram.js';
+import { GatewayCore } from '../src/core.js';
+import { createHttpServer } from '../src/http.js';
+import { openDatabase } from '../src/storage.js';
+import { TelegramGateway } from '../src/telegram.js';
 
 const db = openDatabase(':memory:');
 const core = new GatewayCore(db);
@@ -83,7 +85,8 @@ try {
     summary: 'Local message printed',
   });
   console.log(`Execution: ${result.executionStatus}`);
-} finally {
+}
+finally {
   await app.close();
   db.close();
 }

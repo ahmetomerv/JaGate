@@ -1,7 +1,7 @@
+import type { DeliveryJob } from '../src/core.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { HttpTelegramTransport, TelegramApiError, formatMessage } from '../src/telegram.js';
-import type { DeliveryJob } from '../src/core.js';
+import { formatMessage, HttpTelegramTransport, TelegramApiError } from '../src/telegram.js';
 
 const job: DeliveryJob = {
   id: '123e4567-e89b-42d3-a456-426614174000',
@@ -36,8 +36,8 @@ test('Telegram adapter sends escaped content with opaque callbacks and removes b
     const method = String(url).split('/').at(-1)!;
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     calls.push({ method, body });
-    const result =
-      method === 'getWebhookInfo'
+    const result
+      = method === 'getWebhookInfo'
         ? { url: '' }
         : method === 'sendMessage'
           ? { message_id: 321 }
@@ -55,7 +55,7 @@ test('Telegram adapter sends escaped content with opaque callbacks and removes b
   const updates = await telegram.poll(42, new AbortController().signal);
   assert.deepEqual(updates, []);
   assert.deepEqual(
-    calls.map((c) => c.method),
+    calls.map(c => c.method),
     [
       'getMe',
       'getWebhookInfo',
@@ -82,7 +82,7 @@ test('Telegram adapter sends escaped content with opaque callbacks and removes b
   assert.doesNotMatch(text, /must-not-appear/);
   const markup = sent.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> };
   assert.deepEqual(
-    markup.inline_keyboard.map((row) => row.map((button) => button.callback_data)),
+    markup.inline_keyboard.map(row => row.map(button => button.callback_data)),
     [['a:AbCdEf0123456789', 'r:AbCdEf0123456789']],
   );
   assert.doesNotMatch(JSON.stringify(markup), /Publish|draft|privateValue/);
@@ -152,7 +152,8 @@ test('Telegram preflight checks every distinct destination before polling', asyn
     if (method === 'getChat') {
       const chatId = String((JSON.parse(String(init?.body)) as { chat_id: string }).chat_id);
       checked.push(chatId);
-      if (chatId === '-200') return Response.json({ ok: false }, { status: 400 });
+      if (chatId === '-200')
+        return Response.json({ ok: false }, { status: 400 });
     }
     return Response.json({ ok: true, result: method === 'getWebhookInfo' ? { url: '' } : [] });
   };

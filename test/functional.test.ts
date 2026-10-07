@@ -1,20 +1,27 @@
+import type { DeliveryJob } from '../src/core.js';
+import type { CreateInput } from '../src/model.js';
+import type { Db } from '../src/storage.js';
+import type { TelegramTransport, Update } from '../src/telegram.js';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
-import { openDatabase, type Db } from '../src/storage.js';
-import { GatewayCore, type DeliveryJob } from '../src/core.js';
-import { createHttpServer } from '../src/http.js';
-import { ApprovalClient, ApiError } from '../src/client.js';
-import { TelegramGateway, type TelegramTransport, type Update } from '../src/telegram.js';
-import { createSchema, type CreateInput } from '../src/model.js';
+import { ApiError, ApprovalClient } from '../src/client.js';
 import { parseConfig } from '../src/config.js';
+import { GatewayCore } from '../src/core.js';
+import { createHttpServer } from '../src/http.js';
+import { createSchema } from '../src/model.js';
+import { openDatabase } from '../src/storage.js';
+import { TelegramGateway } from '../src/telegram.js';
 
 const dirs: string[] = [];
 const dbs: Db[] = [];
 afterEach(() => {
-  for (const db of dbs.splice(0)) if (db.open) db.close();
+  for (const db of dbs.splice(0)) {
+    if (db.open)
+      db.close();
+  }
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -255,7 +262,7 @@ test('API validates the full request boundary and never echoes rejected values',
       { ...base, details: Array.from({ length: 11 }, () => ({ label: 'A', value: 'B' })) },
     ],
     ['detail value too long', { ...base, details: [{ label: 'A', value: 'v'.repeat(161) }] }],
-    ['metadata too large', { ...base, metadata: { secret: 'sensitive-' + 'x'.repeat(2048) } }],
+    ['metadata too large', { ...base, metadata: { secret: `sensitive-${'x'.repeat(2048)}` } }],
     ['Telegram escaped text too long', { ...base, description: '&'.repeat(1000) }],
     ['unknown field', { ...base, executeUrl: 'https://example.invalid/action' }],
   ];
@@ -354,7 +361,7 @@ test('scoped client keys are least privilege, owner scoped, revocable, and survi
   assert.equal(created.statusCode, 201);
   const issued = created.json() as { id: string; key: string; clientId: string; scopes: string[] };
   assert.equal(issued.clientId, 'primary');
-  assert.match(issued.key, /^jgk_[A-Za-z0-9_-]{43}$/);
+  assert.match(issued.key, /^jgk_[\w-]{43}$/);
   const stored = db
     .prepare('SELECT key_hash, scopes_json FROM client_keys WHERE id = ?')
     .get(issued.id) as { key_hash: string; scopes_json: string };
@@ -611,7 +618,7 @@ test('every issued-key request scope authorizes only its intended operation', as
       payload: input('scope:claim'),
     })
   ).json();
-  const job = core.dueDeliveries().find((item) => item.id === approved.id)!;
+  const job = core.dueDeliveries().find(item => item.id === approved.id)!;
   core.deliverySucceeded(approved.id, '-100', '101');
   core.decide(job.callbackRef, '-100', '101', '7', 'approved');
   const claim = (
@@ -670,12 +677,13 @@ test('client key creation validates labels, scopes, expiry, and cursor without e
     assert.equal(response.statusCode, 400);
     assert.equal(response.json().error.code, 'invalid_input');
   }
-  for (const query of ['limit=0', 'limit=101', 'cursor=broken', 'extra=value'])
+  for (const query of ['limit=0', 'limit=101', 'cursor=broken', 'extra=value']) {
     assert.equal(
       (await app.inject({ method: 'GET', url: `/v1/client-keys?${query}`, headers })).statusCode,
       400,
       query,
     );
+  }
   for (const query of [
     'limit=0',
     'limit=101',
@@ -683,12 +691,13 @@ test('client key creation validates labels, scopes, expiry, and cursor without e
     'requestId=bad',
     'keyId=bad',
     'extra=value',
-  ])
+  ]) {
     assert.equal(
       (await app.inject({ method: 'GET', url: `/v1/audit-events?${query}`, headers })).statusCode,
       400,
       query,
     );
+  }
   await app.close();
 });
 
@@ -735,7 +744,7 @@ test('issued-key expiry and audit attribute successful actions without storing c
     ).statusCode,
     200,
   );
-  const job = core.dueDeliveries().find((item) => item.id === request.id)!;
+  const job = core.dueDeliveries().find(item => item.id === request.id)!;
   core.deliverySucceeded(request.id, '-100', '101');
   core.decide(job.callbackRef, '-100', '101', '7', 'approved');
   const claim = (
@@ -910,7 +919,7 @@ test('migration adds audit and nullable expiry to an existing issued-key databas
   const existing = core.issueClientKey('primary', 'Existing reader', ['requests:read']);
   db.exec('DROP TABLE audit_events');
   db.exec('ALTER TABLE client_keys DROP COLUMN expires_at');
-  db.prepare("DELETE FROM schema_migrations WHERE version = '006_key_expiry_audit.sql'").run();
+  db.prepare('DELETE FROM schema_migrations WHERE version = \'006_key_expiry_audit.sql\'').run();
   db.close();
   const reopened = openDatabase(path);
   dbs.push(reopened);
@@ -920,7 +929,7 @@ test('migration adds audit and nullable expiry to an existing issued-key databas
   assert.deepEqual(upgraded.listAuditEvents('primary', { limit: 20 }).items, []);
   upgraded.revokeClientKey('primary', existing.id);
   assert.deepEqual(
-    upgraded.listAuditEvents('primary', { limit: 20 }).items.map((event) => event.type),
+    upgraded.listAuditEvents('primary', { limit: 20 }).items.map(event => event.type),
     ['key.revoked'],
   );
 });
@@ -1013,26 +1022,26 @@ test('attention filters find unresolved delivery failures, old claims, and pendi
   const reader = core.issueClientKey('primary', 'Monitor', ['requests:read']);
   const read = async (query: string, authorization = primary.authorization) =>
     app.inject({ method: 'GET', url: `/v1/requests?${query}`, headers: { authorization } });
-  const ids = (page: { items: Array<{ id: string }> }) => page.items.map((item) => item.id);
+  const ids = (page: { items: Array<{ id: string }> }) => page.items.map(item => item.id);
 
   const failed = core.create('primary', input('attention:delivery')).request;
   core.deliveryFailed(failed.id, false, 'Telegram refused delivery');
   const otherFailed = core.create('secondary', input('attention:other')).request;
   core.deliveryFailed(otherFailed.id, false, 'other client');
   const first = core.create('primary', input('attention:claim-one')).request;
-  const firstRef = core.dueDeliveries().find((job) => job.id === first.id)!.callbackRef;
+  const firstRef = core.dueDeliveries().find(job => job.id === first.id)!.callbackRef;
   core.deliverySucceeded(first.id, '-100', '101');
   core.decide(firstRef, '-100', '101', '7', 'approved');
   const firstClaim = core.claim('primary', first.id);
   advance(60_000);
   const second = core.create('primary', input('attention:claim-two')).request;
-  const secondRef = core.dueDeliveries().find((job) => job.id === second.id)!.callbackRef;
+  const secondRef = core.dueDeliveries().find(job => job.id === second.id)!.callbackRef;
   core.deliverySucceeded(second.id, '-100', '102');
   core.decide(secondRef, '-100', '102', '7', 'approved');
   core.claim('primary', second.id);
   advance(60_000);
   const third = core.create('primary', input('attention:claim-three')).request;
-  const thirdRef = core.dueDeliveries().find((job) => job.id === third.id)!.callbackRef;
+  const thirdRef = core.dueDeliveries().find(job => job.id === third.id)!.callbackRef;
   core.deliverySucceeded(third.id, '-100', '103');
   core.decide(thirdRef, '-100', '103', '7', 'approved');
   const thirdClaim = core.claim('primary', third.id);
@@ -1104,7 +1113,7 @@ test('event timeline records lifecycle transitions once, in order, without crede
   });
   const events = core.events('primary', created.id, { limit: 50 }).items;
   assert.deepEqual(
-    events.map((event) => event.type),
+    events.map(event => event.type),
     [
       'request.created',
       'delivery.retry_scheduled',
@@ -1115,15 +1124,15 @@ test('event timeline records lifecycle transitions once, in order, without crede
     ],
   );
   assert.deepEqual(
-    events.map((event) => event.sequence),
+    events.map(event => event.sequence),
     [1, 2, 3, 4, 5, 6],
   );
   assert.deepEqual(
-    events.map((event) => event.attempt),
+    events.map(event => event.attempt),
     [null, 1, 2, null, null, null],
   );
   assert.equal(events[3]?.actorId, '7');
-  assert.ok(events.every((event) => !Number.isNaN(Date.parse(event.occurredAt))));
+  assert.ok(events.every(event => !Number.isNaN(Date.parse(event.occurredAt))));
   const stored = JSON.stringify(
     db.prepare('SELECT * FROM request_events WHERE request_id = ?').all(created.id),
   );
@@ -1150,7 +1159,7 @@ test('timeline API is owner scoped and paginated; expiry, cancellation, rejectio
   const cancelled = core.create('primary', input('timeline:cancelled')).request;
   core.cancel('primary', cancelled.id);
   const rejected = core.create('primary', input('timeline:rejected')).request;
-  const rejectedJob = core.dueDeliveries().find((job) => job.id === rejected.id)!;
+  const rejectedJob = core.dueDeliveries().find(job => job.id === rejected.id)!;
   core.deliverySucceeded(rejected.id, '-100', '101');
   core.decide(rejectedJob.callbackRef, '-100', '101', '7', 'rejected');
   const failed = core.create('primary', input('timeline:failed')).request;
@@ -1172,15 +1181,15 @@ test('timeline API is owner scoped and paginated; expiry, cancellation, rejectio
   );
   assert.equal((await read(expired.id, '?cursor=2')).json().nextCursor, null);
   assert.deepEqual(
-    core.events('primary', cancelled.id, {}).items.map((event) => event.type),
+    core.events('primary', cancelled.id, {}).items.map(event => event.type),
     ['request.created', 'decision.cancelled'],
   );
   assert.deepEqual(
-    core.events('primary', rejected.id, {}).items.map((event) => event.type),
+    core.events('primary', rejected.id, {}).items.map(event => event.type),
     ['request.created', 'delivery.delivered', 'decision.rejected'],
   );
   assert.deepEqual(
-    core.events('primary', failed.id, {}).items.map((event) => event.type),
+    core.events('primary', failed.id, {}).items.map(event => event.type),
     ['request.created', 'delivery.failed', 'decision.expired'],
   );
   assert.equal((await read(expired.id, '', secondary)).statusCode, 404);
@@ -1201,7 +1210,7 @@ test('timeline schema upgrade leaves existing history empty and records later tr
   const { db, path, core, clock } = setup();
   const request = core.create('primary', input('timeline:legacy')).request;
   db.exec('DROP TABLE request_events');
-  db.prepare("DELETE FROM schema_migrations WHERE version = '004_request_events.sql'").run();
+  db.prepare('DELETE FROM schema_migrations WHERE version = \'004_request_events.sql\'').run();
   db.close();
   const reopened = openDatabase(path);
   dbs.push(reopened);
@@ -1210,14 +1219,14 @@ test('timeline schema upgrade leaves existing history empty and records later tr
   assert.deepEqual(restarted.events('primary', request.id, {}).items, []);
   assert.equal(restarted.cancel('primary', request.id).status, 'cancelled');
   assert.deepEqual(
-    restarted.events('primary', request.id, {}).items.map((event) => event.type),
+    restarted.events('primary', request.id, {}).items.map(event => event.type),
     ['decision.cancelled'],
   );
   assert.equal(
     (
       reopened
         .prepare(
-          "SELECT COUNT(*) AS count FROM schema_migrations WHERE version = '004_request_events.sql'",
+          'SELECT COUNT(*) AS count FROM schema_migrations WHERE version = \'004_request_events.sql\'',
         )
         .get() as { count: number }
     ).count,
@@ -1229,12 +1238,12 @@ test('a failed event write rolls back the request state change', () => {
   const { db, core } = setup();
   const request = core.create('primary', input('timeline:atomic')).request;
   db.exec(
-    "CREATE TRIGGER block_events BEFORE INSERT ON request_events BEGIN SELECT RAISE(ABORT, 'blocked event'); END",
+    'CREATE TRIGGER block_events BEFORE INSERT ON request_events BEGIN SELECT RAISE(ABORT, \'blocked event\'); END',
   );
   assert.throws(() => core.cancel('primary', request.id), /blocked event/);
   assert.equal(core.get('primary', request.id).status, 'pending');
   assert.deepEqual(
-    core.events('primary', request.id, {}).items.map((event) => event.type),
+    core.events('primary', request.id, {}).items.map(event => event.type),
     ['request.created'],
   );
   db.exec('DROP TRIGGER block_events');
@@ -1244,7 +1253,7 @@ test('a failed event write rolls back the request state change', () => {
 test('an audit write failure rolls back key issuance and request creation', () => {
   const { db, core } = setup();
   db.exec(
-    "CREATE TRIGGER block_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT, 'blocked audit'); END",
+    'CREATE TRIGGER block_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT, \'blocked audit\'); END',
   );
   assert.throws(
     () => core.issueClientKey('primary', 'Worker', ['requests:create']),
@@ -1473,7 +1482,7 @@ test('callback acknowledgement and message edit failures do not undo a committed
       },
     },
     routes(),
-    (message) => errors.push(message),
+    message => errors.push(message),
   );
   await gateway.process(button(job, 1));
   assert.equal(core.get('primary', request.id).status, 'approved');
@@ -1546,7 +1555,8 @@ test('Telegram delivery failure makes readiness false until a retry succeeds', a
   const transport: TelegramTransport = {
     async check() {},
     async send() {
-      if (attempts++ === 0) throw new Error('temporary failure');
+      if (attempts++ === 0)
+        throw new Error('temporary failure');
       return '101';
     },
     async poll(_offset, signal) {
@@ -1568,7 +1578,8 @@ test('Telegram delivery failure makes readiness false until a retry succeeds', a
     await gateway.deliverDue();
     assert.equal(gateway.isReady(), true);
     assert.equal(core.get('primary', request.id).deliveryStatus, 'delivered');
-  } finally {
+  }
+  finally {
     await gateway.stop();
   }
   assert.equal(gateway.isReady(), false);
@@ -1590,7 +1601,8 @@ test('out-of-order Telegram updates settle once and persist offset across restar
     },
     async poll(offset, signal) {
       offsets.push(offset);
-      if (pollCount++ === 0) return [button(job, 4, 'r'), button(job, 3), button(job, 3)];
+      if (pollCount++ === 0)
+        return [button(job, 4, 'r'), button(job, 3), button(job, 3)];
       return new Promise<Update[]>((_resolve, reject) =>
         signal.addEventListener('abort', () => reject(new DOMException('stopped', 'AbortError')), {
           once: true,
@@ -1610,8 +1622,10 @@ test('out-of-order Telegram updates settle once and persist offset across restar
     await new Promise<void>((resolve, reject) => {
       const deadline = Date.now() + 500;
       const check = () => {
-        if (core.getOffset() === 5) resolve();
-        else if (Date.now() >= deadline) reject(new Error('polling did not commit offset'));
+        if (core.getOffset() === 5)
+          resolve();
+        else if (Date.now() >= deadline)
+          reject(new Error('polling did not commit offset'));
         else setTimeout(check, 5);
       };
       check();
@@ -1620,7 +1634,8 @@ test('out-of-order Telegram updates settle once and persist offset across restar
     assert.deepEqual(edits, ['approved']);
     assert.deepEqual(answers, ['Approved.', 'Already approved.']);
     assert.deepEqual(offsets.slice(0, 2), [0, 5]);
-  } finally {
+  }
+  finally {
     await gateway.stop();
   }
   db.close();
@@ -1646,7 +1661,7 @@ test('client methods complete a failed execution and preserve API errors', async
     expiresInSeconds: 60,
   });
   assert.deepEqual(
-    (await client.listRequests({ status: 'pending', limit: 1 })).items.map((item) => item.id),
+    (await client.listRequests({ status: 'pending', limit: 1 })).items.map(item => item.id),
     [request.id],
   );
   assert.deepEqual(
@@ -1655,7 +1670,7 @@ test('client methods complete a failed execution and preserve API errors', async
         status: 'pending',
         expiresBefore: new Date(Date.parse(request.expiresAt) + 1).toISOString(),
       })
-    ).items.map((item) => item.id),
+    ).items.map(item => item.id),
     [request.id],
   );
   assert.deepEqual(
@@ -1695,18 +1710,18 @@ test('client methods complete a failed execution and preserve API errors', async
   assert.equal(final.resultSummary, 'Target unavailable');
   assert.equal((await client.getRequest(request.id)).executionStatus, 'failed');
   assert.deepEqual(
-    (await client.listAuditEvents({ requestId: request.id })).items.map((event) => event.type),
+    (await client.listAuditEvents({ requestId: request.id })).items.map(event => event.type),
     ['execution.failed', 'execution.claimed', 'request.created'],
   );
   const firstEvents = await client.getRequestEvents(request.id, { limit: 2 });
   assert.deepEqual(
-    firstEvents.items.map((event) => event.type),
+    firstEvents.items.map(event => event.type),
     ['request.created', 'delivery.delivered'],
   );
   assert.equal(typeof firstEvents.nextCursor, 'string');
   assert.deepEqual(
     (await client.getRequestEvents(request.id, { cursor: firstEvents.nextCursor! })).items.map(
-      (event) => event.type,
+      event => event.type,
     ),
     ['decision.approved', 'execution.claimed', 'execution.failed'],
   );
@@ -1736,11 +1751,11 @@ test('client methods complete a failed execution and preserve API errors', async
     { status: 403, code: 'insufficient_scope' },
   );
   assert.deepEqual(
-    (await client.listClientKeys()).items.map((item) => item.id),
+    (await client.listClientKeys()).items.map(item => item.id),
     [issued.id],
   );
   assert.deepEqual(
-    (await client.listAuditEvents({ keyId: issued.id })).items.map((event) => event.type),
+    (await client.listAuditEvents({ keyId: issued.id })).items.map(event => event.type),
     ['key.issued'],
   );
   assert.equal((await client.revokeClientKey(issued.id)).revokedAt === null, false);
@@ -1803,7 +1818,7 @@ test('two clients share one gateway without sharing requests or idempotency keys
   ])
     await assert.rejects(operation(), { status: 404, code: 'not_found' });
   assert.equal((await alpha.getRequest(a.id)).status, 'pending');
-  const job = core.dueDeliveries().find((due) => due.id === a.id)!;
+  const job = core.dueDeliveries().find(due => due.id === a.id)!;
   core.deliverySucceeded(a.id, '-100', '101');
   core.decide(job.callbackRef, '-100', '101', '7', 'approved');
   await assert.rejects(beta.claim(a.id), { status: 404, code: 'not_found' });

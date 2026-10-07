@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs';
-import { loadEnvFile } from 'node:process';
 import { resolve } from 'node:path';
+import { loadEnvFile } from 'node:process';
 import { createServer } from 'vite';
 import { createPlayground, loadLiveClientKeys } from './server.js';
 
-if (existsSync('.env')) loadEnvFile('.env');
+if (existsSync('.env'))
+  loadEnvFile('.env');
 
 const app = createPlayground({
   databasePath: resolve('data/playground.sqlite'),
@@ -17,7 +18,8 @@ let vite: Awaited<ReturnType<typeof createServer>>;
 try {
   vite = await createServer({ configFile: resolve('playground/vite.config.ts') });
   await vite.listen();
-} catch (error) {
+}
+catch (error) {
   await app.close();
   throw error;
 }
@@ -27,12 +29,14 @@ console.info(`Live gateway: ${process.env.GATEWAY_URL ?? 'http://127.0.0.1:3080'
 
 let closing = false;
 async function close() {
-  if (closing) return;
+  if (closing)
+    return;
   closing = true;
   await vite.close();
   await app.close();
 }
-for (const signal of ['SIGINT', 'SIGTERM'] as const)
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
     void close();
   });
+}

@@ -1,9 +1,11 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
-import Fastify, { type FastifyInstance } from 'fastify';
-import { ZodError, z } from 'zod';
+import type { FastifyInstance } from 'fastify';
 import type { GatewayCore } from './core.js';
+import type { ClientKeyScope } from './model.js';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import Fastify from 'fastify';
+import { z, ZodError } from 'zod';
 import { GatewayError } from './errors.js';
-import { clientKeyScopes, createSchema, type ClientKeyScope } from './model.js';
+import { clientKeyScopes, createSchema } from './model.js';
 
 const idSchema = z.string().uuid();
 const utcTimestampSchema = z
@@ -12,12 +14,12 @@ const utcTimestampSchema = z
   .datetime()
   .regex(/(?:\.\d{1,3})?Z$/)
   .refine(
-    (value) =>
-      !Number.isNaN(Date.parse(value)) &&
-      new Date(value).toISOString().slice(0, 19) === value.slice(0, 19),
+    value =>
+      !Number.isNaN(Date.parse(value))
+      && new Date(value).toISOString().slice(0, 19) === value.slice(0, 19),
     'invalid UTC date',
   )
-  .transform((value) => new Date(value).toISOString());
+  .transform(value => new Date(value).toISOString());
 const listQuerySchema = z
   .object({
     status: z.enum(['pending', 'approved', 'rejected', 'expired', 'cancelled']).optional(),
@@ -27,14 +29,14 @@ const listQuerySchema = z
     expiresBefore: utcTimestampSchema.optional(),
     limit: z
       .string()
-      .regex(/^[1-9][0-9]{0,2}$/)
+      .regex(/^[1-9]\d{0,2}$/)
       .transform(Number)
       .pipe(z.number().max(100))
       .default('20'),
     cursor: z
       .string()
       .max(256)
-      .regex(/^[A-Za-z0-9_-]+$/)
+      .regex(/^[\w-]+$/)
       .optional(),
   })
   .strict();
@@ -43,39 +45,42 @@ const eventsQuerySchema = z
   .object({
     limit: z
       .string()
-      .regex(/^[1-9][0-9]{0,2}$/)
+      .regex(/^[1-9]\d{0,2}$/)
       .transform(Number)
       .pipe(z.number().max(100))
       .default('50'),
     cursor: z
       .string()
-      .regex(/^[1-9][0-9]*$/)
+      .regex(/^[1-9]\d*$/)
       .max(15)
       .optional(),
   })
   .strict();
 
 function decodeCursor(cursor: string | undefined): { createdAt: string; id: string } | undefined {
-  if (!cursor) return undefined;
+  if (!cursor)
+    return undefined;
   try {
     const [createdAt, id] = cursorSchema.parse(
       JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')),
     );
     return { createdAt, id };
-  } catch {
+  }
+  catch {
     throw new GatewayError('invalid_input', 400, 'invalid pagination cursor');
   }
 }
 const resultSchema = z
   .object({
-    claimToken: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+    claimToken: z.string().regex(/^[\w-]{43}$/),
     status: z.enum(['succeeded', 'failed']),
     summary: z
       .string()
       .trim()
       .min(1)
       .max(300)
-      .refine((s) => !/[\u0000-\u001f]/.test(s)),
+      // eslint-disable-next-line no-control-regex -- reject ASCII control characters
+      .refine(s => !/[\u0000-\u001F]/.test(s)),
   })
   .strict();
 const issueKeySchema = z
@@ -85,12 +90,13 @@ const issueKeySchema = z
       .trim()
       .min(1)
       .max(80)
-      .refine((value) => !/[\u0000-\u001f]/.test(value)),
+      // eslint-disable-next-line no-control-regex -- reject ASCII control characters
+      .refine(value => !/[\u0000-\u001F]/.test(value)),
     scopes: z
       .array(z.enum(clientKeyScopes))
       .min(1)
       .max(clientKeyScopes.length)
-      .refine((values) => new Set(values).size === values.length, 'scopes must be unique'),
+      .refine(values => new Set(values).size === values.length, 'scopes must be unique'),
     expiresAt: utcTimestampSchema.optional(),
   })
   .strict();
@@ -99,13 +105,13 @@ const auditQuerySchema = z
   .object({
     limit: z
       .string()
-      .regex(/^[1-9][0-9]{0,2}$/)
+      .regex(/^[1-9]\d{0,2}$/)
       .transform(Number)
       .pipe(z.number().max(100))
       .default('20'),
     cursor: z
       .string()
-      .regex(/^[1-9][0-9]*$/)
+      .regex(/^[1-9]\d*$/)
       .max(15)
       .optional(),
     requestId: idSchema.optional(),
@@ -139,12 +145,14 @@ function clientIdFor(
   header: string | undefined,
   clientKeys: ReadonlyMap<string, string>,
 ): string | undefined {
-  if (!header?.startsWith('Bearer ') || header.length > 256) return undefined;
+  if (!header?.startsWith('Bearer ') || header.length > 256)
+    return undefined;
   const supplied = createHash('sha256').update(header.slice(7)).digest();
   let clientId: string | undefined;
   for (const [id, key] of clientKeys) {
     const expected = createHash('sha256').update(key).digest();
-    if (timingSafeEqual(supplied, expected)) clientId = id;
+    if (timingSafeEqual(supplied, expected))
+      clientId = id;
   }
   return clientId;
 }
@@ -156,11 +164,12 @@ export function createHttpServer(
 ): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: 12_000 });
   app.setErrorHandler((error, _request, reply) => {
-    if (error instanceof GatewayError)
+    if (error instanceof GatewayError) {
       return reply
         .code(error.statusCode)
         .send({ error: { code: error.code, message: error.message } });
-    if (error instanceof ZodError)
+    }
+    if (error instanceof ZodError) {
       return reply.code(400).send({
         error: {
           code: 'invalid_input',
@@ -168,15 +177,17 @@ export function createHttpServer(
           issues: error.issues.map(({ path, message }) => ({ path: path.join('.'), message })),
         },
       });
+    }
     if (
-      error instanceof Error &&
-      'statusCode' in error &&
-      typeof error.statusCode === 'number' &&
-      error.statusCode < 500
-    )
+      error instanceof Error
+      && 'statusCode' in error
+      && typeof error.statusCode === 'number'
+      && error.statusCode < 500
+    ) {
       return reply
         .code(error.statusCode)
         .send({ error: { code: 'invalid_input', message: 'invalid request body' } });
+    }
     return reply
       .code(500)
       .send({ error: { code: 'internal_error', message: 'internal server error' } });
@@ -186,7 +197,8 @@ export function createHttpServer(
     let storage = false;
     try {
       storage = core.storageReady();
-    } catch {
+    }
+    catch {
       /* unavailable */
     }
     const telegram = telegramReady();
@@ -209,13 +221,14 @@ export function createHttpServer(
         }
         const header = request.headers.authorization;
         const key = header?.startsWith('Bearer ') && header.length <= 256 ? header.slice(7) : '';
-        const stored = /^jgk_[A-Za-z0-9_-]{43}$/.test(key)
+        const stored = /^jgk_[\w-]{43}$/.test(key)
           ? core.authenticateClientKey(key)
           : undefined;
-        if (!stored || !clientKeys.has(stored.clientId))
+        if (!stored || !clientKeys.has(stored.clientId)) {
           return reply
             .code(401)
             .send({ error: { code: 'unauthorized', message: 'valid client bearer key required' } });
+        }
         request.clientId = stored.clientId;
         request.issuedKeyId = stored.id;
         request.clientScopes = new Set(stored.scopes);

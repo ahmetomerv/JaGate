@@ -1,27 +1,32 @@
+import type { DeliveryJob } from '../src/core.js';
+import type { CreateInput } from '../src/model.js';
+import type { Db } from '../src/storage.js';
+import type { TelegramTransport, Update } from '../src/telegram.js';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
 import Database from 'better-sqlite3';
-import { openDatabase, type Db } from '../src/storage.js';
-import { GatewayCore, type DeliveryJob } from '../src/core.js';
-import { createHttpServer } from '../src/http.js';
 import { ApprovalClient, WaitTimeoutError } from '../src/client.js';
+import { GatewayCore } from '../src/core.js';
+import { createHttpServer } from '../src/http.js';
+import { openDatabase } from '../src/storage.js';
 import {
-  TelegramGateway,
-  TelegramApiError,
-  HttpTelegramTransport,
-  type TelegramTransport,
-  type Update,
   formatMessage,
+  HttpTelegramTransport,
+  TelegramApiError,
+  TelegramGateway,
+
 } from '../src/telegram.js';
-import type { CreateInput } from '../src/model.js';
 
 const dirs: string[] = [];
 const dbs: Db[] = [];
 afterEach(() => {
-  for (const db of dbs.splice(0)) if (db.open) db.close();
+  for (const db of dbs.splice(0)) {
+    if (db.open)
+      db.close();
+  }
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -43,15 +48,17 @@ function setup() {
     now: () => time,
   };
 }
-const input = (key = 'deploy:abc'): CreateInput => ({
-  idempotencyKey: key,
-  action: 'deploy',
-  title: 'Deploy website',
-  description: 'Deploy revision abc',
-  details: [{ label: 'Environment', value: 'production' }],
-  expiresInSeconds: 900,
-  metadata: { trace: 'local' },
-});
+function input(key = 'deploy:abc'): CreateInput {
+  return {
+    idempotencyKey: key,
+    action: 'deploy',
+    title: 'Deploy website',
+    description: 'Deploy revision abc',
+    details: [{ label: 'Environment', value: 'production' }],
+    expiresInSeconds: 900,
+    metadata: { trace: 'local' },
+  };
+}
 const routes = () => new Map([['primary', { chatId: '-100', approverIds: new Set(['7']) }]]);
 
 class FakeTelegram implements TelegramTransport {
@@ -62,11 +69,13 @@ class FakeTelegram implements TelegramTransport {
   failures = 0;
   async check() {}
   async send(job: DeliveryJob, chatId: string) {
-    if (this.failures-- > 0) throw new TelegramApiError('transient', 'test failure');
+    if (this.failures-- > 0)
+      throw new TelegramApiError('transient', 'test failure');
     this.sent.push(job);
     this.sentChats.push(chatId);
     return String(100 + this.sent.length);
   }
+
   async poll(_offset: number, signal: AbortSignal): Promise<Update[]> {
     return new Promise((_resolve, reject) =>
       signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), {
@@ -74,9 +83,11 @@ class FakeTelegram implements TelegramTransport {
       }),
     );
   }
+
   async answer(_id: string, text: string) {
     this.answers.push(text);
   }
+
   async edit(_job: DeliveryJob, _chatId: string, _id: string, status: string) {
     this.edits.push(status);
   }
@@ -177,8 +188,8 @@ test('each client delivers to its own chat and only its approvers can decide', a
   const alpha = core.create('alpha', input('alpha:one')).request;
   const beta = core.create('beta', input('beta:one')).request;
   await gateway.deliverDue();
-  const alphaJob = sent.find((item) => item.job.view.clientId === 'alpha')!;
-  const betaJob = sent.find((item) => item.job.view.clientId === 'beta')!;
+  const alphaJob = sent.find(item => item.job.view.clientId === 'alpha')!;
+  const betaJob = sent.find(item => item.job.view.clientId === 'beta')!;
   assert.equal(alphaJob.chatId, '-100');
   assert.equal(betaJob.chatId, '-200');
   assert.match(
@@ -190,7 +201,7 @@ test('each client delivers to its own chat and only its approvers can decide', a
   await gateway.process(callback(betaJob.job, 7, -200));
   assert.equal(core.get('alpha', alpha.id).status, 'pending');
   assert.equal(core.get('beta', beta.id).status, 'pending');
-  assert.deepEqual(answers, Array(3).fill('You are not authorized to decide this request.'));
+  assert.deepEqual(answers, Array.from({ length: 3 }).fill('You are not authorized to decide this request.'));
   await gateway.process(callback(alphaJob.job, 7, -100));
   await gateway.process(callback(betaJob.job, 8, -200, 101, 'r'));
   assert.equal(core.get('alpha', alpha.id).status, 'approved');
@@ -235,7 +246,7 @@ test('a changed destination requeues pending delivery and invalidates old button
     assert.equal(restarted.get('primary', request.id).status, 'approved');
     assert.equal(restarted.get('primary', request.id).decidedBy, '8');
     assert.deepEqual(
-      restarted.events('primary', request.id, {}).items.map((event) => event.type),
+      restarted.events('primary', request.id, {}).items.map(event => event.type),
       [
         'request.created',
         'delivery.delivered',
@@ -244,7 +255,8 @@ test('a changed destination requeues pending delivery and invalidates old button
         'decision.approved',
       ],
     );
-  } finally {
+  }
+  finally {
     await moved.stop();
   }
 });
@@ -269,7 +281,8 @@ test('changing only approvers revokes old users without redelivering pending mes
     await gateway.process(callback(job, 8));
     assert.equal(core.get('primary', request.id).status, 'approved');
     assert.equal(core.get('primary', request.id).decidedBy, '8');
-  } finally {
+  }
+  finally {
     await gateway.stop();
   }
 });
@@ -286,7 +299,8 @@ test('an old request for a removed client cannot block configured clients', asyn
     assert.equal(core.get('primary', current.id).deliveryStatus, 'delivered');
     assert.deepEqual(fake.sentChats, ['-100']);
     assert.equal(gateway.isReady(), true);
-  } finally {
+  }
+  finally {
     await gateway.stop();
   }
 });
@@ -321,7 +335,8 @@ test('upgrading an existing database requeues a pending message without a chat b
     assert.equal(restarted.get('primary', request.id).status, 'pending');
     await gateway.process(callback(newJob));
     assert.equal(restarted.get('primary', request.id).status, 'approved');
-  } finally {
+  }
+  finally {
     await gateway.stop();
   }
 });
@@ -365,9 +380,9 @@ test('claim is atomic, final result requires token, crash leaves unknown outcome
     Promise.resolve().then(() => core.claim('primary', request.id)),
     Promise.resolve().then(() => core.claim('primary', request.id)),
   ]);
-  assert.equal(attempts.filter((x) => x.status === 'fulfilled').length, 1);
+  assert.equal(attempts.filter(x => x.status === 'fulfilled').length, 1);
   const claim = (
-    attempts.find((x) => x.status === 'fulfilled') as PromiseFulfilledResult<
+    attempts.find(x => x.status === 'fulfilled') as PromiseFulfilledResult<
       ReturnType<typeof core.claim>
     >
   ).value;
@@ -521,7 +536,7 @@ test('HTTP auth, validation, and concurrent claims', async () => {
     app.inject({ method: 'POST', url: `/v1/requests/${id}/claim`, headers, payload: {} }),
     app.inject({ method: 'POST', url: `/v1/requests/${id}/claim`, headers, payload: {} }),
   ]);
-  assert.deepEqual(claims.map((x) => x.statusCode).sort(), [200, 409]);
+  assert.deepEqual(claims.map(x => x.statusCode).sort(), [200, 409]);
   assert.equal(
     (
       await app.inject({
@@ -529,7 +544,7 @@ test('HTTP auth, validation, and concurrent claims', async () => {
         url: `/v1/requests/${id}/result`,
         headers,
         payload: {
-          claimToken: claims.find((x) => x.statusCode === 200)!.json().claimToken,
+          claimToken: claims.find(x => x.statusCode === 200)!.json().claimToken,
           status: 'succeeded',
           summary: 'done',
         },

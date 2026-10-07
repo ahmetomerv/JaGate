@@ -1,16 +1,17 @@
+import type { TelegramRoute } from '../src/config.js';
+import type { CreateRequestInput } from '../src/model.js';
+import type { TelegramTransport, Update } from '../src/telegram.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import { z } from 'zod';
-import { parseClientKeys, type TelegramRoute } from '../src/config.js';
+import { parseClientKeys } from '../src/config.js';
 import { GatewayCore } from '../src/core.js';
 import { createHttpServer } from '../src/http.js';
-import type { CreateRequestInput } from '../src/model.js';
 import { openDatabase } from '../src/storage.js';
 import {
   TelegramApiError,
   TelegramGateway,
-  type TelegramTransport,
-  type Update,
+
 } from '../src/telegram.js';
 
 const clients = ['ci-pipeline', 'cloud-ops', 'billing-service'] as const;
@@ -148,6 +149,7 @@ class SimulatedTelegram implements TelegramTransport {
   constructor(lastMessageId: number) {
     this.nextMessageId = lastMessageId + 1;
   }
+
   async check(): Promise<void> {}
   async send(...args: Parameters<TelegramTransport['send']>): Promise<string> {
     void args;
@@ -157,30 +159,35 @@ class SimulatedTelegram implements TelegramTransport {
     }
     return String(this.nextMessageId++);
   }
+
   async poll(...args: Parameters<TelegramTransport['poll']>): Promise<Update[]> {
     void args;
     return [];
   }
+
   async answer(id: string, message: string): Promise<void> {
     this.answers.set(id, message);
   }
+
   async edit(): Promise<void> {}
 }
 
-export type PlaygroundOptions = {
+export interface PlaygroundOptions {
   databasePath: string;
   liveClientKeys?: ReadonlyMap<string, string> | undefined;
   gatewayUrl?: string;
   fetcher?: typeof fetch;
-};
+}
 
 export function loadLiveClientKeys(
   env: NodeJS.ProcessEnv,
 ): ReadonlyMap<string, string> | undefined {
-  if (!env.CLIENT_KEYS) return undefined;
+  if (!env.CLIENT_KEYS)
+    return undefined;
   try {
     return parseClientKeys(env.CLIENT_KEYS);
-  } catch {
+  }
+  catch {
     return undefined;
   }
 }
@@ -188,12 +195,12 @@ export function loadLiveClientKeys(
 export function createPlayground(options: PlaygroundOptions) {
   const db = openDatabase(options.databasePath);
   const savedOffset = db
-    .prepare("SELECT value FROM settings WHERE key = 'playground_clock_offset_ms'")
+    .prepare('SELECT value FROM settings WHERE key = \'playground_clock_offset_ms\'')
     .get() as { value: string } | undefined;
   let clockOffsetMs = Number(savedOffset?.value ?? 0);
   const core = new GatewayCore(db, () => new Date(Date.now() + clockOffsetMs));
   const simulatedKeys = new Map<ClientId, string>(
-    clients.map((id) => [id, randomBytes(32).toString('base64url')]),
+    clients.map(id => [id, randomBytes(32).toString('base64url')]),
   );
   const simulatedApi = createHttpServer(core, simulatedKeys, () => true);
   const lastMessage = db
@@ -208,7 +215,8 @@ export function createPlayground(options: PlaygroundOptions) {
   const fetcher = options.fetcher ?? fetch;
 
   app.addHook('onRequest', async (request, reply) => {
-    if (request.url === '/api/bootstrap') return;
+    if (request.url === '/api/bootstrap')
+      return;
     if (request.headers['x-playground-token'] !== accessToken)
       return reply.code(403).send({ error: 'Playground session token required' });
   });
@@ -222,12 +230,12 @@ export function createPlayground(options: PlaygroundOptions) {
       gatewayUrl: liveUrl,
       simulatedNow: new Date(Date.now() + clockOffsetMs).toISOString(),
       failNextDelivery: transport.failNextSend,
-    }),
-  );
+    }));
 
   app.post('/api/execute', async (request, reply) => {
     const parsed = commandSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'Invalid playground command' });
+    if (!parsed.success)
+      return reply.code(400).send({ error: 'Invalid playground command' });
     const {
       mode,
       clientId,
@@ -250,8 +258,8 @@ export function createPlayground(options: PlaygroundOptions) {
       return reply.code(400).send({ error: 'Select or enter a client key ID' });
     if (auth === 'scoped' && !scopedKey)
       return reply.code(400).send({ error: 'Enter an issued client key' });
-    const path =
-      operation === 'health' || operation === 'ready'
+    const path
+      = operation === 'health' || operation === 'ready'
         ? `/${operation}`
         : operation === 'create' || operation === 'list'
           ? '/v1/requests'
@@ -261,39 +269,51 @@ export function createPlayground(options: PlaygroundOptions) {
               ? '/v1/client-keys'
               : operation === 'keyRevoke'
                 ? `/v1/client-keys/${encodeURIComponent(keyId!)}/revoke`
-                : `/v1/requests/${encodeURIComponent(requestId!)}` +
-                  (operation === 'get' ? '' : `/${operation}`);
+                : `/v1/requests/${encodeURIComponent(requestId!)}${
+                  operation === 'get' ? '' : `/${operation}`}`;
     const query = new URLSearchParams();
-    if (operation === 'list' && filters)
-      for (const [key, value] of Object.entries(filters))
-        if (value !== undefined && value !== '') query.set(key, String(value));
-    if (operation === 'events' && eventPage)
-      for (const [key, value] of Object.entries(eventPage))
-        if (value !== undefined && value !== '') query.set(key, String(value));
-    if (operation === 'keyList' && keyPage)
-      for (const [key, value] of Object.entries(keyPage))
-        if (value !== undefined && value !== '') query.set(key, String(value));
-    if (operation === 'audit' && auditPage)
-      for (const [key, value] of Object.entries(auditPage))
-        if (value !== undefined && value !== '') query.set(key, String(value));
+    if (operation === 'list' && filters) {
+      for (const [key, value] of Object.entries(filters)) {
+        if (value !== undefined && value !== '')
+          query.set(key, String(value));
+      }
+    }
+    if (operation === 'events' && eventPage) {
+      for (const [key, value] of Object.entries(eventPage)) {
+        if (value !== undefined && value !== '')
+          query.set(key, String(value));
+      }
+    }
+    if (operation === 'keyList' && keyPage) {
+      for (const [key, value] of Object.entries(keyPage)) {
+        if (value !== undefined && value !== '')
+          query.set(key, String(value));
+      }
+    }
+    if (operation === 'audit' && auditPage) {
+      for (const [key, value] of Object.entries(auditPage)) {
+        if (value !== undefined && value !== '')
+          query.set(key, String(value));
+      }
+    }
     const url = `${path}${query.size ? `?${query}` : ''}`;
     const method = ['list', 'get', 'events', 'keyList', 'audit', 'health', 'ready'].includes(
       operation,
     )
       ? 'GET'
       : 'POST';
-    const key =
-      mode === 'simulated' ? simulatedKeys.get(clientId as ClientId)! : liveKeys!.get(clientId)!;
-    const authorization =
-      auth === 'missing'
+    const key
+      = mode === 'simulated' ? simulatedKeys.get(clientId as ClientId)! : liveKeys!.get(clientId)!;
+    const authorization
+      = auth === 'missing'
         ? undefined
         : `Bearer ${auth === 'invalid' ? 'invalid-playground-key' : auth === 'scoped' ? scopedKey : key}`;
     const headers = {
       ...(authorization ? { authorization } : {}),
       ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
     };
-    const body =
-      operation === 'create' || operation === 'result' || operation === 'keyCreate' ? payload : {};
+    const body
+      = operation === 'create' || operation === 'result' || operation === 'keyCreate' ? payload : {};
 
     if (mode === 'simulated') {
       const result = await simulatedApi.inject({
@@ -302,7 +322,8 @@ export function createPlayground(options: PlaygroundOptions) {
         headers,
         ...(method === 'POST' ? { payload: JSON.stringify(body ?? {}) } : {}),
       });
-      if (operation === 'create' && result.statusCode === 201) await telegram.deliverDue();
+      if (operation === 'create' && result.statusCode === 201)
+        await telegram.deliverDue();
       return { status: result.statusCode, body: result.json() as unknown };
     }
     try {
@@ -313,7 +334,8 @@ export function createPlayground(options: PlaygroundOptions) {
         signal: AbortSignal.timeout(10_000),
       });
       return { status: response.status, body: (await response.json()) as unknown };
-    } catch {
+    }
+    catch {
       return {
         status: 502,
         body: {
@@ -333,7 +355,8 @@ export function createPlayground(options: PlaygroundOptions) {
       })
       .strict()
       .safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'Invalid simulated decision' });
+    if (!parsed.success)
+      return reply.code(400).send({ error: 'Invalid simulated decision' });
     const { requestId, clientId, decision, actor } = parsed.data;
     const row = db
       .prepare(
@@ -341,12 +364,13 @@ export function createPlayground(options: PlaygroundOptions) {
       )
       .get(requestId, clientId) as
       | {
-          callback_ref: string;
-          delivery_chat_id: string | null;
-          delivery_message_id: string | null;
-        }
+        callback_ref: string;
+        delivery_chat_id: string | null;
+        delivery_message_id: string | null;
+      }
       | undefined;
-    if (!row) return reply.code(404).send({ error: 'Request not found for this client' });
+    if (!row)
+      return reply.code(404).send({ error: 'Request not found for this client' });
     if (!row.delivery_chat_id || !row.delivery_message_id)
       return reply.code(409).send({ error: 'Request has not been delivered' });
     const route = routes.get(clientId)!;
@@ -380,7 +404,7 @@ export function createPlayground(options: PlaygroundOptions) {
       return reply.code(400).send({ error: 'Seconds must be between 1 and 86400' });
     clockOffsetMs += parsed.data.seconds * 1000;
     db.prepare(
-      "INSERT INTO settings(key,value) VALUES ('playground_clock_offset_ms',?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      'INSERT INTO settings(key,value) VALUES (\'playground_clock_offset_ms\',?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
     ).run(String(clockOffsetMs));
     return { now: new Date(Date.now() + clockOffsetMs).toISOString(), expired: core.expire() };
   });

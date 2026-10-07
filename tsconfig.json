@@ -1,17 +1,17 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "rootDir": ".",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
-    "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "outDir": "dist",
-    "rootDir": ".",
+    "noUncheckedIndexedAccess": true,
     "declaration": true,
-    "lib": ["ES2022", "DOM"]
+    "outDir": "dist",
+    "esModuleInterop": true,
+    "skipLibCheck": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "playground/**/*.ts"]
 }

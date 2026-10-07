@@ -1,27 +1,16 @@
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import type { AuditEvent, AuditEventType, ClientKeyScope, ClientKeyView, CreateInput, DecisionStatus, IssuedClientKey, ListAuditEventsPage, ListClientKeysPage, ListRequestsPage, ListRequestsQuery, RequestEvent, RequestEventsPage, RequestEventType, RequestView } from './model.js';
 import type { Db } from './storage.js';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { GatewayError } from './errors.js';
 import {
+
   canonicalContent,
+
   hash,
-  type AuditEvent,
-  type AuditEventType,
-  type ClientKeyScope,
-  type ClientKeyView,
-  type CreateInput,
-  type DecisionStatus,
-  type IssuedClientKey,
-  type ListAuditEventsPage,
-  type ListClientKeysPage,
-  type ListRequestsPage,
-  type ListRequestsQuery,
-  type RequestEvent,
-  type RequestEventType,
-  type RequestEventsPage,
-  type RequestView,
+
 } from './model.js';
 
-type Row = {
+interface Row {
   id: string;
   client_id: string;
   idempotency_key: string;
@@ -49,9 +38,9 @@ type Row = {
   callback_ref: string;
   delivery_message_id: string | null;
   delivery_chat_id: string | null;
-};
+}
 
-type ClientKeyRow = {
+interface ClientKeyRow {
   id: string;
   client_id: string;
   label: string;
@@ -60,8 +49,8 @@ type ClientKeyRow = {
   created_at: string;
   expires_at: string | null;
   revoked_at: string | null;
-};
-type AuditRow = {
+}
+interface AuditRow {
   id: number;
   type: AuditEventType;
   occurred_at: string;
@@ -69,9 +58,9 @@ type AuditRow = {
   actor_key_id: string | null;
   request_id: string | null;
   subject_key_id: string | null;
-};
+}
 
-export type DeliveryJob = { id: string; callbackRef: string; view: RequestView; attempts: number };
+export interface DeliveryJob { id: string; callbackRef: string; view: RequestView; attempts: number }
 
 export class GatewayCore {
   constructor(
@@ -82,9 +71,11 @@ export class GatewayCore {
   private iso(): string {
     return this.now().toISOString();
   }
+
   private row(id: string): Row | undefined {
     return this.db.prepare('SELECT * FROM requests WHERE id = ?').get(id) as Row | undefined;
   }
+
   private keyView(row: ClientKeyRow): ClientKeyView {
     return {
       id: row.id,
@@ -146,7 +137,7 @@ export class GatewayCore {
       .all(...values, options.limit + 1) as AuditRow[];
     const page = rows.slice(0, options.limit);
     return {
-      items: page.map((row) => ({
+      items: page.map(row => ({
         id: row.id,
         type: row.type,
         occurredAt: row.occurred_at,
@@ -229,7 +220,7 @@ export class GatewayCore {
     const page = rows.slice(0, limit);
     const last = page.at(-1);
     return {
-      items: page.map((row) => this.keyView(row)),
+      items: page.map(row => this.keyView(row)),
       nextCursor:
         rows.length > limit && last
           ? Buffer.from(JSON.stringify([last.created_at, last.id])).toString('base64url')
@@ -243,15 +234,19 @@ export class GatewayCore {
         .prepare(
           'UPDATE client_keys SET revoked_at = ? WHERE id = ? AND client_id = ? AND revoked_at IS NULL',
         )
-        .run(this.iso(), id, clientId).changes;
+        .run(this.iso(), id, clientId)
+        .changes;
       const row = this.db
         .prepare('SELECT * FROM client_keys WHERE id = ? AND client_id = ?')
         .get(id, clientId) as ClientKeyRow | undefined;
-      if (!row) throw new GatewayError('not_found', 404, 'client key not found');
-      if (changed) this.appendAudit(clientId, 'key.revoked', null, null, id);
+      if (!row)
+        throw new GatewayError('not_found', 404, 'client key not found');
+      if (changed)
+        this.appendAudit(clientId, 'key.revoked', null, null, id);
       return this.keyView(row);
     })();
   }
+
   private appendEvent(
     id: string,
     type: RequestEventType,
@@ -266,6 +261,7 @@ export class GatewayCore {
       )
       .run(id, type, occurredAt, actorId, attempt, id);
   }
+
   private view(row: Row): RequestView {
     return {
       id: row.id,
@@ -295,7 +291,7 @@ export class GatewayCore {
       const now = this.iso();
       const rows = this.db
         .prepare(
-          "UPDATE requests SET decision_status = 'expired', decided_at = ? WHERE decision_status = 'pending' AND expires_at <= ? RETURNING id",
+          'UPDATE requests SET decision_status = \'expired\', decided_at = ? WHERE decision_status = \'pending\' AND expires_at <= ? RETURNING id',
         )
         .all(now, now) as Array<{ id: string }>;
       for (const row of rows) this.appendEvent(row.id, 'decision.expired', now);
@@ -315,12 +311,13 @@ export class GatewayCore {
         .prepare('SELECT * FROM requests WHERE client_id = ? AND idempotency_key = ?')
         .get(clientId, input.idempotencyKey) as Row | undefined;
       if (existing) {
-        if (existing.fingerprint !== fingerprint)
+        if (existing.fingerprint !== fingerprint) {
           throw new GatewayError(
             'idempotency_conflict',
             409,
             'idempotency key already belongs to different request content',
           );
+        }
         this.expire();
         return { request: this.view(this.row(existing.id)!), created: false };
       }
@@ -361,7 +358,8 @@ export class GatewayCore {
   private getInternal(id: string): RequestView {
     this.expire();
     const row = this.row(id);
-    if (!row) throw new GatewayError('not_found', 404, 'request not found');
+    if (!row)
+      throw new GatewayError('not_found', 404, 'request not found');
     return this.view(row);
   }
 
@@ -370,7 +368,8 @@ export class GatewayCore {
     const row = this.db
       .prepare('SELECT * FROM requests WHERE id = ? AND client_id = ?')
       .get(id, clientId) as Row | undefined;
-    if (!row) throw new GatewayError('not_found', 404, 'request not found');
+    if (!row)
+      throw new GatewayError('not_found', 404, 'request not found');
     return this.view(row);
   }
 
@@ -394,7 +393,7 @@ export class GatewayCore {
       attempt: number | null;
     }>;
     const page = rows.slice(0, limit);
-    const items: RequestEvent[] = page.map((row) => ({
+    const items: RequestEvent[] = page.map(row => ({
       sequence: row.sequence,
       type: row.type,
       occurredAt: row.occurred_at,
@@ -444,7 +443,7 @@ export class GatewayCore {
     const items = rows.slice(0, limit);
     const last = items.at(-1);
     return {
-      items: items.map((row) => this.view(row)),
+      items: items.map(row => this.view(row)),
       nextCursor:
         rows.length > limit && last
           ? Buffer.from(JSON.stringify([last.created_at, last.id])).toString('base64url')
@@ -458,9 +457,10 @@ export class GatewayCore {
       const now = this.iso();
       const changed = this.db
         .prepare(
-          "UPDATE requests SET decision_status = 'cancelled', decided_at = ? WHERE id = ? AND client_id = ? AND decision_status = 'pending' AND expires_at > ?",
+          'UPDATE requests SET decision_status = \'cancelled\', decided_at = ? WHERE id = ? AND client_id = ? AND decision_status = \'pending\' AND expires_at > ?',
         )
-        .run(now, id, clientId, now).changes;
+        .run(now, id, clientId, now)
+        .changes;
       if (!changed) {
         this.get(clientId, id);
         throw new GatewayError('invalid_state', 409, 'only a pending request can be cancelled');
@@ -496,8 +496,10 @@ export class GatewayCore {
           `UPDATE requests SET decision_status = ?, decided_by = ?, decided_at = ?
         WHERE id = ? AND decision_status = 'pending' AND expires_at > ? AND delivery_status = 'delivered' AND delivery_chat_id = ? AND delivery_message_id = ?`,
         )
-        .run(decision, actorId, now, row.id, now, chatId, messageId).changes;
-      if (changed) this.appendEvent(row.id, `decision.${decision}`, now, actorId);
+        .run(decision, actorId, now, row.id, now, chatId, messageId)
+        .changes;
+      if (changed)
+        this.appendEvent(row.id, `decision.${decision}`, now, actorId);
       const current = this.getInternal(row.id);
       return {
         outcome: changed
@@ -525,7 +527,8 @@ export class GatewayCore {
           `UPDATE requests SET execution_status = 'claimed', claimed_at = ?, claim_id = ?, claim_token_hash = ?
         WHERE id = ? AND client_id = ? AND decision_status = 'approved' AND execution_status = 'unclaimed'`,
         )
-        .run(now, claimId, hash(claimToken), id, clientId).changes;
+        .run(now, claimId, hash(claimToken), id, clientId)
+        .changes;
       if (!changed) {
         this.get(clientId, id);
         throw new GatewayError('not_claimable', 409, 'request is not approved and unclaimed');
@@ -547,7 +550,8 @@ export class GatewayCore {
     const row = this.db
       .prepare('SELECT * FROM requests WHERE id = ? AND client_id = ?')
       .get(id, clientId) as Row | undefined;
-    if (!row) throw new GatewayError('not_found', 404, 'request not found');
+    if (!row)
+      throw new GatewayError('not_found', 404, 'request not found');
     const candidate = Buffer.from(hash(token), 'hex');
     const saved = Buffer.from(row.claim_token_hash ?? '0'.repeat(64), 'hex');
     if (!timingSafeEqual(candidate, saved) || !row.claim_token_hash)
@@ -559,8 +563,10 @@ export class GatewayCore {
           `UPDATE requests SET execution_status = ?, result_summary = ?, result_at = ?
         WHERE id = ? AND client_id = ? AND execution_status = 'claimed' AND claim_token_hash = ?`,
         )
-        .run(status, summary, now, id, clientId, row.claim_token_hash).changes;
-      if (!changed) throw new GatewayError('invalid_state', 409, 'result already reported');
+        .run(status, summary, now, id, clientId, row.claim_token_hash)
+        .changes;
+      if (!changed)
+        throw new GatewayError('invalid_state', 409, 'result already reported');
       this.appendEvent(id, `execution.${status}`, now);
       this.appendAudit(clientId, `execution.${status}`, actorKeyId, id);
       return this.get(clientId, id);
@@ -575,7 +581,7 @@ export class GatewayCore {
       AND delivery_status IN ('pending','retrying') AND next_delivery_at <= ? ORDER BY created_at LIMIT ?`,
       )
       .all(this.iso(), limit) as Row[];
-    return rows.map((r) => ({
+    return rows.map(r => ({
       id: r.id,
       callbackRef: r.callback_ref,
       view: this.view(r),
@@ -592,7 +598,8 @@ export class GatewayCore {
         WHERE id = ? AND delivery_status IN ('pending','retrying') RETURNING delivery_attempts`,
         )
         .get(chatId, messageId, id) as { delivery_attempts: number } | undefined;
-      if (row) this.appendEvent(id, 'delivery.delivered', this.iso(), null, row.delivery_attempts);
+      if (row)
+        this.appendEvent(id, 'delivery.delivered', this.iso(), null, row.delivery_attempts);
     })();
   }
 
@@ -608,15 +615,18 @@ export class GatewayCore {
       let changed = 0;
       for (const row of rows) {
         const destination = destinations.get(row.client_id);
-        if (!destination || destination === row.delivery_chat_id) continue;
+        if (!destination || destination === row.delivery_chat_id)
+          continue;
         const updated = this.db
           .prepare(
             `UPDATE requests SET delivery_status = 'pending', delivery_attempts = 0,
           next_delivery_at = ?, delivery_error = NULL, delivery_chat_id = NULL, delivery_message_id = NULL, callback_ref = ?
           WHERE id = ? AND decision_status = 'pending' AND delivery_status = 'delivered'`,
           )
-          .run(this.iso(), randomBytes(12).toString('base64url'), row.id).changes;
-        if (updated) this.appendEvent(row.id, 'delivery.requeued', this.iso());
+          .run(this.iso(), randomBytes(12).toString('base64url'), row.id)
+          .changes;
+        if (updated)
+          this.appendEvent(row.id, 'delivery.requeued', this.iso());
         changed += updated;
       }
       return changed;
@@ -626,11 +636,12 @@ export class GatewayCore {
   deliveryFailed(id: string, retryable: boolean, reason: string): void {
     this.db.transaction(() => {
       const row = this.row(id);
-      if (!row || !['pending', 'retrying'].includes(row.delivery_status)) return;
+      if (!row || !['pending', 'retrying'].includes(row.delivery_status))
+        return;
       const now = this.iso();
       const attempts = row.delivery_attempts + 1;
-      const retry =
-        retryable && attempts < 5 && row.decision_status === 'pending' && row.expires_at > now;
+      const retry
+        = retryable && attempts < 5 && row.decision_status === 'pending' && row.expires_at > now;
       const delay = Math.min(60_000, 2000 * 2 ** (attempts - 1));
       this.db
         .prepare(
@@ -656,18 +667,20 @@ export class GatewayCore {
   getOffset(): number {
     return Number(
       (
-        this.db.prepare("SELECT value FROM settings WHERE key = 'telegram_offset'").get() as
+        this.db.prepare('SELECT value FROM settings WHERE key = \'telegram_offset\'').get() as
           { value: string } | undefined
       )?.value ?? 0,
     );
   }
+
   saveOffset(offset: number): void {
     this.db
       .prepare(
-        "INSERT INTO settings(key,value) VALUES ('telegram_offset',?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE CAST(value AS INTEGER) < CAST(excluded.value AS INTEGER)",
+        'INSERT INTO settings(key,value) VALUES (\'telegram_offset\',?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE CAST(value AS INTEGER) < CAST(excluded.value AS INTEGER)',
       )
       .run(String(offset));
   }
+
   storageReady(): boolean {
     return (this.db.prepare('SELECT 1 AS ok').get() as { ok: number }).ok === 1;
   }

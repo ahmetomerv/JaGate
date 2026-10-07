@@ -1,20 +1,20 @@
-import type { GatewayCore, DeliveryJob } from './core.js';
 import type { TelegramRoute } from './config.js';
+import type { DeliveryJob, GatewayCore } from './core.js';
 
-export type Callback = {
+export interface Callback {
   id: string;
   data?: string;
   from: { id: number };
   message?: { message_id: number; chat: { id: number } };
-};
-export type Update = { update_id: number; callback_query?: Callback };
-export type TelegramTransport = {
-  check(chatIds: ReadonlySet<string>): Promise<void>;
-  send(job: DeliveryJob, chatId: string): Promise<string>;
-  poll(offset: number, signal: AbortSignal): Promise<Update[]>;
-  answer(id: string, text: string): Promise<void>;
-  edit(job: DeliveryJob, chatId: string, messageId: string, status: string): Promise<void>;
-};
+}
+export interface Update { update_id: number; callback_query?: Callback }
+export interface TelegramTransport {
+  check: (chatIds: ReadonlySet<string>) => Promise<void>;
+  send: (job: DeliveryJob, chatId: string) => Promise<string>;
+  poll: (offset: number, signal: AbortSignal) => Promise<Update[]>;
+  answer: (id: string, text: string) => Promise<void>;
+  edit: (job: DeliveryJob, chatId: string, messageId: string, status: string) => Promise<void>;
+}
 
 export class TelegramApiError extends Error {
   constructor(
@@ -23,17 +23,19 @@ export class TelegramApiError extends Error {
   ) {
     super(message);
   }
+
   get retryable(): boolean {
     return this.kind === 'transient';
   }
 }
 
-const escapeHtml = (value: string): string =>
-  value
+function escapeHtml(value: string): string {
+  return value
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
+}
 export function formatMessage(job: DeliveryJob, status?: string): string {
   const { view } = job;
   const details = view.details
@@ -47,6 +49,7 @@ export class HttpTelegramTransport implements TelegramTransport {
     private readonly token: string,
     private readonly fetcher: typeof fetch = fetch,
   ) {}
+
   private async call<T>(
     method: string,
     body: Record<string, unknown>,
@@ -61,19 +64,22 @@ export class HttpTelegramTransport implements TelegramTransport {
         body: JSON.stringify(body),
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
-    } catch {
-      if (signal?.aborted) throw new DOMException('Polling stopped', 'AbortError');
+    }
+    catch {
+      if (signal?.aborted)
+        throw new DOMException('Polling stopped', 'AbortError');
       throw new TelegramApiError('transient', 'Telegram network request failed');
     }
     let payload: { ok?: boolean; result?: T } = {};
     try {
       payload = (await response.json()) as typeof payload;
-    } catch {
+    }
+    catch {
       /* classified below */
     }
     if (!response.ok || !payload.ok) {
-      const kind =
-        response.status === 409
+      const kind
+        = response.status === 409
           ? 'conflict'
           : response.status === 429 || response.status >= 500
             ? 'transient'
@@ -82,37 +88,44 @@ export class HttpTelegramTransport implements TelegramTransport {
     }
     return payload.result as T;
   }
+
   async check(chatIds: ReadonlySet<string>): Promise<void> {
     await this.call('getMe', {});
     const info = await this.call<{ url?: string }>('getWebhookInfo', {});
-    if (info.url)
+    if (info.url) {
       throw new TelegramApiError(
         'webhook',
         'Bot has an active webhook. Remove it explicitly or use a dedicated bot token.',
       );
+    }
     for (const chatId of chatIds) {
       try {
         await this.call('getChat', { chat_id: chatId });
-      } catch (error) {
-        if (error instanceof TelegramApiError && error.kind === 'permanent')
+      }
+      catch (error) {
+        if (error instanceof TelegramApiError && error.kind === 'permanent') {
           throw new TelegramApiError(
             'permanent',
             `Bot cannot access configured chat ${chatId}. Check its numeric ID and add the bot to that chat.`,
           );
+        }
         throw error;
       }
     }
     try {
       await this.call('getUpdates', { timeout: 0, limit: 1, allowed_updates: ['callback_query'] });
-    } catch (error) {
-      if (error instanceof TelegramApiError && error.kind === 'conflict')
+    }
+    catch (error) {
+      if (error instanceof TelegramApiError && error.kind === 'conflict') {
         throw new TelegramApiError(
           'conflict',
           'Another poller is using this bot token. Stop it or use a dedicated bot.',
         );
+      }
       throw error;
     }
   }
+
   async send(job: DeliveryJob, chatId: string): Promise<string> {
     const result = await this.call<{ message_id: number }>('sendMessage', {
       chat_id: chatId,
@@ -130,6 +143,7 @@ export class HttpTelegramTransport implements TelegramTransport {
     });
     return String(result.message_id);
   }
+
   poll(offset: number, signal: AbortSignal): Promise<Update[]> {
     return this.call<Update[]>(
       'getUpdates',
@@ -137,9 +151,11 @@ export class HttpTelegramTransport implements TelegramTransport {
       signal,
     );
   }
+
   async answer(id: string, text: string): Promise<void> {
     await this.call('answerCallbackQuery', { callback_query_id: id, text: text.slice(0, 180) });
   }
+
   async edit(job: DeliveryJob, chatId: string, messageId: string, status: string): Promise<void> {
     await this.call('editMessageText', {
       chat_id: chatId,
@@ -169,8 +185,9 @@ export class TelegramGateway {
   isReady(): boolean {
     return this.pollReady && this.deliveryReady;
   }
+
   async start(): Promise<void> {
-    await this.transport.check(new Set([...this.routes.values()].map((route) => route.chatId)));
+    await this.transport.check(new Set([...this.routes.values()].map(route => route.chatId)));
     this.core.requeueMovedDestinations(
       new Map([...this.routes].map(([id, route]) => [id, route.chatId])),
     );
@@ -183,15 +200,19 @@ export class TelegramGateway {
     this.pollTask = this.pollLoop();
     await this.deliverDue();
   }
+
   async stop(): Promise<void> {
     this.stopped = true;
     this.pollReady = false;
-    if (this.deliveryTimer) clearInterval(this.deliveryTimer);
+    if (this.deliveryTimer)
+      clearInterval(this.deliveryTimer);
     this.controller?.abort();
     await this.pollTask;
   }
+
   async deliverDue(): Promise<void> {
-    if (this.delivering) return;
+    if (this.delivering)
+      return;
     this.delivering = true;
     try {
       for (const job of this.core.dueDeliveries()) {
@@ -209,30 +230,35 @@ export class TelegramGateway {
           const messageId = await this.transport.send(job, route.chatId);
           this.core.deliverySucceeded(job.id, route.chatId, messageId);
           this.deliveryReady = true;
-        } catch (error) {
+        }
+        catch (error) {
           this.deliveryReady = false;
           const retryable = !(error instanceof TelegramApiError) || error.retryable;
-          const reason =
-            error instanceof TelegramApiError ? error.message : 'Telegram network request failed';
+          const reason
+            = error instanceof TelegramApiError ? error.message : 'Telegram network request failed';
           this.core.deliveryFailed(job.id, retryable, reason);
           this.onError(`Telegram delivery failed for request ${job.id}: ${reason}`);
         }
       }
-    } finally {
+    }
+    finally {
       this.delivering = false;
     }
   }
+
   async process(update: Update): Promise<void> {
     const callback = update.callback_query;
-    if (!callback) return;
-    const answer = async (message: string) => {
+    if (!callback)
+      return;
+    const answer = async (message: string): Promise<void> => {
       try {
         await this.transport.answer(callback.id, message);
-      } catch {
+      }
+      catch {
         this.onError('Could not answer Telegram callback');
       }
     };
-    const match = /^([ar]):([A-Za-z0-9_-]{16})$/.exec(callback.data ?? '');
+    const match = /^([ar]):([\w-]{16})$/.exec(callback.data ?? '');
     if (!match || !callback.message) {
       await answer('This button is no longer available.');
       return;
@@ -243,8 +269,8 @@ export class TelegramGateway {
       return;
     }
     if (
-      String(callback.message.chat.id) !== route.chatId ||
-      !route.approverIds.has(String(callback.from.id))
+      String(callback.message.chat.id) !== route.chatId
+      || !route.approverIds.has(String(callback.from.id))
     ) {
       await answer('You are not authorized to decide this request.');
       return;
@@ -271,11 +297,13 @@ export class TelegramGateway {
           String(callback.message.message_id),
           result.request.status,
         );
-      } catch {
+      }
+      catch {
         this.onError('Could not update Telegram decision message');
       }
     }
   }
+
   private async pollLoop(): Promise<void> {
     while (!this.stopped) {
       this.controller = new AbortController();
@@ -283,12 +311,15 @@ export class TelegramGateway {
         const updates = await this.transport.poll(this.core.getOffset(), this.controller.signal);
         this.pollReady = true;
         for (const update of updates.sort((a, b) => a.update_id - b.update_id)) {
-          if (update.update_id < this.core.getOffset()) continue;
+          if (update.update_id < this.core.getOffset())
+            continue;
           await this.process(update);
           this.core.saveOffset(update.update_id + 1);
         }
-      } catch (error) {
-        if (this.stopped || (error instanceof Error && error.name === 'AbortError')) break;
+      }
+      catch (error) {
+        if (this.stopped || (error instanceof Error && error.name === 'AbortError'))
+          break;
         this.pollReady = false;
         if (error instanceof TelegramApiError && error.kind === 'conflict') {
           this.onError('Another poller is using this bot token. Stop it or use a dedicated bot.');
@@ -299,8 +330,9 @@ export class TelegramGateway {
             ? `Telegram polling failed (${error.kind})`
             : 'Telegram polling failed',
         );
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      } finally {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      finally {
         this.controller = null;
       }
     }
