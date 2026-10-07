@@ -27,7 +27,14 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Helvetica,
+    Arial,
+    sans-serif;
   font-size: 16px;
   line-height: 1.5;
 }
@@ -35,7 +42,7 @@ body {
 button,
 input,
 select {
-  padding: .5rem;
+  padding: 0.5rem;
 }
 
 a {
@@ -218,11 +225,11 @@ p {
   margin-bottom: 1rem;
 }
 
-.view-nav button[aria-pressed="true"] {
+.view-nav button[aria-pressed='true'] {
   font-weight: 700;
 }
 
-.inbox-list button[aria-pressed="true"] {
+.inbox-list button[aria-pressed='true'] {
   background: #2a2a2a;
   color: var(--text);
   box-shadow: inset 3px 0 0 #d4d4d4;
@@ -249,7 +256,6 @@ p {
 }
 
 .inbox-id {
-
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -267,7 +273,7 @@ p {
   color: var(--muted);
   border: 1px solid #3d3d3d;
   border-radius: 2px;
-  padding: .75rem 1rem;
+  padding: 0.75rem 1rem;
 }
 
 .intro strong {
@@ -608,22 +614,37 @@ label textarea {
   background: #666;
 }
 
-.dot.ok { background: #3dd68c; }
-.dot.bad { background: #ff5d5d; }
-.dot.wait { background: #ffb020; }
-.dot.expired { background: #d0d0d0; }
+.dot.ok {
+  background: #3dd68c;
+}
+.dot.bad {
+  background: #ff5d5d;
+}
+.dot.wait {
+  background: #ffb020;
+}
+.dot.expired {
+  background: #d0d0d0;
+}
 
 .inbox-list .dot.wait {
   animation: pending-dot 2.2s ease-in-out infinite;
 }
 
 @keyframes pending-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.12; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.12;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .inbox-list .dot.wait { animation: none; }
+  .inbox-list .dot.wait {
+    animation: none;
+  }
 }
 
 .pager {
@@ -765,8 +786,12 @@ label textarea {
   padding-left: 0.9rem;
 }
 
-.status-ok { color: #3dd68c; }
-.status-bad { color: #ff5d5d; }
+.status-ok {
+  color: #3dd68c;
+}
+.status-bad {
+  color: #ff5d5d;
+}
 
 pre {
   max-height: 18rem;
@@ -780,7 +805,7 @@ pre {
   gap: 0.5rem;
 }
 
-.tabs button[aria-selected="true"] {
+.tabs button[aria-selected='true'] {
   font-weight: 700;
 }
 

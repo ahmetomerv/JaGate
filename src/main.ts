@@ -8,9 +8,12 @@ const config = parseConfig(process.env);
 
 const db = openDatabase(config.DATABASE_PATH);
 const core = new GatewayCore(db);
-const telegram = new TelegramGateway(core,
-  new HttpTelegramTransport(config.TELEGRAM_BOT_TOKEN), config.routes,
-  (message) => console.error(message));
+const telegram = new TelegramGateway(
+  core,
+  new HttpTelegramTransport(config.TELEGRAM_BOT_TOKEN),
+  config.routes,
+  (message) => console.error(message),
+);
 const app = createHttpServer(core, config.clientKeys, () => telegram.isReady());
 
 try {
@@ -25,5 +28,11 @@ try {
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => { void (async () => { await app.close(); await telegram.stop(); db.close(); })(); });
+  process.on(signal, () => {
+    void (async () => {
+      await app.close();
+      await telegram.stop();
+      db.close();
+    })();
+  });
 }

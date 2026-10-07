@@ -14,13 +14,16 @@ export function openDatabase(path: string): Db {
   db.pragma('foreign_keys = ON');
   const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY)');
-  const files = readdirSync(root).filter((f) => /^\d+_.*\.sql$/.test(f)).sort();
+  const files = readdirSync(root)
+    .filter((f) => /^\d+_.*\.sql$/.test(f))
+    .sort();
   for (const file of files) {
     const applied = db.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(file);
-    if (!applied) db.transaction(() => {
-      db.exec(readFileSync(join(root, file), 'utf8'));
-      db.prepare('INSERT INTO schema_migrations(version) VALUES (?)').run(file);
-    })();
+    if (!applied)
+      db.transaction(() => {
+        db.exec(readFileSync(join(root, file), 'utf8'));
+        db.prepare('INSERT INTO schema_migrations(version) VALUES (?)').run(file);
+      })();
   }
   return db;
 }

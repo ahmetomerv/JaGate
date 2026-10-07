@@ -29,15 +29,31 @@ async function token(app: ReturnType<typeof createPlayground>) {
   return (response.json() as { token: string }).token;
 }
 
-async function call(app: ReturnType<typeof createPlayground>, session: string, url: string, payload?: unknown) {
-  return app.inject({ method: payload === undefined ? 'GET' : 'POST', url,
-    headers: { 'x-playground-token': session, ...(payload === undefined ? {} : { 'content-type': 'application/json' }) },
-    ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }) });
+async function call(
+  app: ReturnType<typeof createPlayground>,
+  session: string,
+  url: string,
+  payload?: unknown,
+) {
+  return app.inject({
+    method: payload === undefined ? 'GET' : 'POST',
+    url,
+    headers: {
+      'x-playground-token': session,
+      ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
+    },
+    ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }),
+  });
 }
 
 const input = (idempotencyKey = 'playground:test') => ({
-  idempotencyKey, action: 'local-test', title: 'Test approval', description: 'Harmless local approval',
-  details: [{ label: 'Target', value: 'local' }], metadata: { source: 'test' }, expiresInSeconds: 900,
+  idempotencyKey,
+  action: 'local-test',
+  title: 'Test approval',
+  description: 'Harmless local approval',
+  details: [{ label: 'Target', value: 'local' }],
+  metadata: { source: 'test' },
+  expiresInSeconds: 900,
 });
 
 function command(operation: string, extras: Record<string, unknown> = {}) {
@@ -55,67 +71,239 @@ test('three simulated clients have distinct, usable approval scenarios', async (
     assert.ok(example.label);
     assert.ok(example.scenario);
     assert.equal(example.request.action, expectedActions[index]);
-    const created = (await call(app, boot.token, '/api/execute', command('create', {
-      clientId, payload: example.request,
-    }))).json();
+    const created = (
+      await call(
+        app,
+        boot.token,
+        '/api/execute',
+        command('create', {
+          clientId,
+          payload: example.request,
+        }),
+      )
+    ).json();
     assert.equal(created.status, 201);
     assert.equal(created.body.clientId, clientId);
     assert.equal(created.body.title, example.request.title);
     const otherClient = clients[(index + 1) % clients.length];
-    assert.equal((await call(app, boot.token, '/api/execute', command('get', {
-      clientId: otherClient, requestId: created.body.id,
-    }))).json().status, 404);
-    const approved = (await call(app, boot.token, '/api/decide', {
-      clientId, requestId: created.body.id, decision: 'approve', actor: 'allowed',
-    })).json();
+    assert.equal(
+      (
+        await call(
+          app,
+          boot.token,
+          '/api/execute',
+          command('get', {
+            clientId: otherClient,
+            requestId: created.body.id,
+          }),
+        )
+      ).json().status,
+      404,
+    );
+    const approved = (
+      await call(app, boot.token, '/api/decide', {
+        clientId,
+        requestId: created.body.id,
+        decision: 'approve',
+        actor: 'allowed',
+      })
+    ).json();
     assert.equal(approved.request.status, 'approved');
   }
 });
 
 test('playground guards commands and exercises HTTP auth, ownership and idempotency', async () => {
   const { app } = setup();
-  assert.equal((await app.inject({ method: 'POST', url: '/api/execute', payload: command('create', { payload: input() }) })).statusCode, 403);
+  assert.equal(
+    (
+      await app.inject({
+        method: 'POST',
+        url: '/api/execute',
+        payload: command('create', { payload: input() }),
+      })
+    ).statusCode,
+    403,
+  );
   const session = await token(app);
-  assert.deepEqual((await app.inject({ method: 'GET', url: '/api/bootstrap' })).json().simulatedClients,
-    ['ci-pipeline', 'cloud-ops', 'billing-service']);
-  const first = (await call(app, session, '/api/execute', command('create', { payload: input() }))).json() as { status: number; body: { id: string } };
+  assert.deepEqual(
+    (await app.inject({ method: 'GET', url: '/api/bootstrap' })).json().simulatedClients,
+    ['ci-pipeline', 'cloud-ops', 'billing-service'],
+  );
+  const first = (
+    await call(app, session, '/api/execute', command('create', { payload: input() }))
+  ).json() as { status: number; body: { id: string } };
   assert.equal(first.status, 201);
   const id = first.body.id;
-  const listed = (await call(app, session, '/api/execute', command('list', { filters: { deliveryStatus: 'delivered' } }))).json();
+  const listed = (
+    await call(
+      app,
+      session,
+      '/api/execute',
+      command('list', { filters: { deliveryStatus: 'delivered' } }),
+    )
+  ).json();
   assert.equal(listed.status, 200);
-  assert.deepEqual(listed.body.items.map((item: { id: string }) => item.id), [id]);
-  assert.deepEqual((await call(app, session, '/api/execute', command('list', { clientId: 'cloud-ops' }))).json().body.items, []);
-  assert.deepEqual((await call(app, session, '/api/execute', command('list', { clientId: 'billing-service' }))).json().body.items, []);
-  assert.equal((await call(app, session, '/api/execute', command('list', { auth: 'missing' }))).json().status, 401);
-  assert.equal((await call(app, session, '/api/execute', command('create', { payload: input() }))).json().status, 200);
-  assert.equal((await call(app, session, '/api/execute', command('create', { payload: { ...input(), title: 'Changed' } }))).json().status, 409);
-  assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id, clientId: 'cloud-ops' }))).json().status, 404);
-  assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id, clientId: 'billing-service' }))).json().status, 404);
-  assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id, auth: 'missing' }))).json().status, 401);
-  assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id, auth: 'invalid' }))).json().status, 401);
-  const timeline = (await call(app, session, '/api/execute', command('events', { requestId: id, eventPage: { limit: 1 } }))).json();
+  assert.deepEqual(
+    listed.body.items.map((item: { id: string }) => item.id),
+    [id],
+  );
+  assert.deepEqual(
+    (await call(app, session, '/api/execute', command('list', { clientId: 'cloud-ops' }))).json()
+      .body.items,
+    [],
+  );
+  assert.deepEqual(
+    (
+      await call(app, session, '/api/execute', command('list', { clientId: 'billing-service' }))
+    ).json().body.items,
+    [],
+  );
+  assert.equal(
+    (await call(app, session, '/api/execute', command('list', { auth: 'missing' }))).json().status,
+    401,
+  );
+  assert.equal(
+    (await call(app, session, '/api/execute', command('create', { payload: input() }))).json()
+      .status,
+    200,
+  );
+  assert.equal(
+    (
+      await call(
+        app,
+        session,
+        '/api/execute',
+        command('create', { payload: { ...input(), title: 'Changed' } }),
+      )
+    ).json().status,
+    409,
+  );
+  assert.equal(
+    (
+      await call(
+        app,
+        session,
+        '/api/execute',
+        command('get', { requestId: id, clientId: 'cloud-ops' }),
+      )
+    ).json().status,
+    404,
+  );
+  assert.equal(
+    (
+      await call(
+        app,
+        session,
+        '/api/execute',
+        command('get', { requestId: id, clientId: 'billing-service' }),
+      )
+    ).json().status,
+    404,
+  );
+  assert.equal(
+    (
+      await call(app, session, '/api/execute', command('get', { requestId: id, auth: 'missing' }))
+    ).json().status,
+    401,
+  );
+  assert.equal(
+    (
+      await call(app, session, '/api/execute', command('get', { requestId: id, auth: 'invalid' }))
+    ).json().status,
+    401,
+  );
+  const timeline = (
+    await call(
+      app,
+      session,
+      '/api/execute',
+      command('events', { requestId: id, eventPage: { limit: 1 } }),
+    )
+  ).json();
   assert.equal(timeline.status, 200);
-  assert.deepEqual(timeline.body.items.map((event: { type: string }) => event.type), ['request.created']);
+  assert.deepEqual(
+    timeline.body.items.map((event: { type: string }) => event.type),
+    ['request.created'],
+  );
   assert.equal(timeline.body.nextCursor, '1');
-  assert.deepEqual((await call(app, session, '/api/execute', command('events', { requestId: id, eventPage: { cursor: '1' } }))).json().body.items.map((event: { type: string }) => event.type), ['delivery.delivered']);
-  assert.equal((await call(app, session, '/api/execute', command('events', { requestId: id, clientId: 'cloud-ops' }))).json().status, 404);
-  assert.equal((await call(app, session, '/api/execute', command('events', { requestId: id, auth: 'missing' }))).json().status, 401);
+  assert.deepEqual(
+    (
+      await call(
+        app,
+        session,
+        '/api/execute',
+        command('events', { requestId: id, eventPage: { cursor: '1' } }),
+      )
+    )
+      .json()
+      .body.items.map((event: { type: string }) => event.type),
+    ['delivery.delivered'],
+  );
+  assert.equal(
+    (
+      await call(
+        app,
+        session,
+        '/api/execute',
+        command('events', { requestId: id, clientId: 'cloud-ops' }),
+      )
+    ).json().status,
+    404,
+  );
+  assert.equal(
+    (
+      await call(
+        app,
+        session,
+        '/api/execute',
+        command('events', { requestId: id, auth: 'missing' }),
+      )
+    ).json().status,
+    401,
+  );
 });
 
 test('playground forwards attention cutoffs and exposes its simulated clock for fixed queries', async () => {
   const { app } = setup();
-  const boot = (await app.inject({ method: 'GET', url: '/api/bootstrap' })).json() as { token: string; simulatedNow: string };
+  const boot = (await app.inject({ method: 'GET', url: '/api/bootstrap' })).json() as {
+    token: string;
+    simulatedNow: string;
+  };
   assert.ok(Number.isFinite(Date.parse(boot.simulatedNow)));
-  const created = (await call(app, boot.token, '/api/execute', command('create', { payload: input('attention:playground') }))).json();
+  const created = (
+    await call(
+      app,
+      boot.token,
+      '/api/execute',
+      command('create', { payload: input('attention:playground') }),
+    )
+  ).json();
   const expiresAt = created.body.expiresAt as string;
   const before = new Date(Date.parse(expiresAt) + 1).toISOString();
-  const after = (await call(app, boot.token, '/api/execute', command('list', {
-    filters: { status: 'pending', expiresBefore: before },
-  }))).json();
-  assert.deepEqual(after.body.items.map((item: { id: string }) => item.id), [created.body.id]);
-  const excluded = (await call(app, boot.token, '/api/execute', command('list', {
-    filters: { status: 'pending', expiresBefore: expiresAt },
-  }))).json();
+  const after = (
+    await call(
+      app,
+      boot.token,
+      '/api/execute',
+      command('list', {
+        filters: { status: 'pending', expiresBefore: before },
+      }),
+    )
+  ).json();
+  assert.deepEqual(
+    after.body.items.map((item: { id: string }) => item.id),
+    [created.body.id],
+  );
+  const excluded = (
+    await call(
+      app,
+      boot.token,
+      '/api/execute',
+      command('list', {
+        filters: { status: 'pending', expiresBefore: expiresAt },
+      }),
+    )
+  ).json();
   assert.deepEqual(excluded.body.items, []);
   const advanced = (await call(app, boot.token, '/api/advance-time', { seconds: 1 })).json();
   assert.ok(Date.parse(advanced.now) > Date.parse(boot.simulatedNow));
@@ -126,124 +314,384 @@ test('playground forwards attention cutoffs and exposes its simulated clock for 
 test('simulated decisions honor approvers, claims and one-time results across restart', async () => {
   const { app, path } = setup();
   const session = await token(app);
-  const created = (await call(app, session, '/api/execute', command('create', { payload: input('playground:decision') }))).json();
+  const created = (
+    await call(
+      app,
+      session,
+      '/api/execute',
+      command('create', { payload: input('playground:decision') }),
+    )
+  ).json();
   const id = created.body.id as string;
-  const outsider = (await call(app, session, '/api/decide', { requestId: id, clientId: 'ci-pipeline', decision: 'approve', actor: 'outsider' })).json();
+  const outsider = (
+    await call(app, session, '/api/decide', {
+      requestId: id,
+      clientId: 'ci-pipeline',
+      decision: 'approve',
+      actor: 'outsider',
+    })
+  ).json();
   assert.match(outsider.message, /not authorized/);
   assert.equal(outsider.request.status, 'pending');
-  const approved = (await call(app, session, '/api/decide', { requestId: id, clientId: 'ci-pipeline', decision: 'approve', actor: 'allowed' })).json();
+  const approved = (
+    await call(app, session, '/api/decide', {
+      requestId: id,
+      clientId: 'ci-pipeline',
+      decision: 'approve',
+      actor: 'allowed',
+    })
+  ).json();
   assert.equal(approved.request.status, 'approved');
-  const claim = (await call(app, session, '/api/execute', command('claim', { requestId: id }))).json();
+  const claim = (
+    await call(app, session, '/api/execute', command('claim', { requestId: id }))
+  ).json();
   assert.equal(claim.status, 200);
-  assert.equal((await call(app, session, '/api/execute', command('claim', { requestId: id }))).json().status, 409);
-  assert.equal((await call(app, session, '/api/execute', command('result', { requestId: id,
-    payload: { claimToken: 'x'.repeat(43), status: 'succeeded', summary: 'Wrong token' } }))).json().status, 403);
-  const result = (await call(app, session, '/api/execute', command('result', { requestId: id,
-    payload: { claimToken: claim.body.claimToken, status: 'failed', summary: 'Test failure' } }))).json();
+  assert.equal(
+    (await call(app, session, '/api/execute', command('claim', { requestId: id }))).json().status,
+    409,
+  );
+  assert.equal(
+    (
+      await call(
+        app,
+        session,
+        '/api/execute',
+        command('result', {
+          requestId: id,
+          payload: { claimToken: 'x'.repeat(43), status: 'succeeded', summary: 'Wrong token' },
+        }),
+      )
+    ).json().status,
+    403,
+  );
+  const result = (
+    await call(
+      app,
+      session,
+      '/api/execute',
+      command('result', {
+        requestId: id,
+        payload: { claimToken: claim.body.claimToken, status: 'failed', summary: 'Test failure' },
+      }),
+    )
+  ).json();
   assert.equal(result.body.executionStatus, 'failed');
-  assert.equal((await call(app, session, '/api/execute', command('result', { requestId: id,
-    payload: { claimToken: claim.body.claimToken, status: 'failed', summary: 'Again' } }))).json().status, 409);
+  assert.equal(
+    (
+      await call(
+        app,
+        session,
+        '/api/execute',
+        command('result', {
+          requestId: id,
+          payload: { claimToken: claim.body.claimToken, status: 'failed', summary: 'Again' },
+        }),
+      )
+    ).json().status,
+    409,
+  );
   await app.close();
   apps.splice(apps.indexOf(app), 1);
   const restarted = createPlayground({ databasePath: path });
   apps.push(restarted);
   const nextSession = await token(restarted);
-  assert.equal((await call(restarted, nextSession, '/api/execute', command('get', { requestId: id }))).json().body.executionStatus, 'failed');
-  assert.deepEqual((await call(restarted, nextSession, '/api/execute', command('events', { requestId: id }))).json().body.items.map((event: { type: string }) => event.type),
-    ['request.created', 'delivery.delivered', 'decision.approved', 'execution.claimed', 'execution.failed']);
+  assert.equal(
+    (await call(restarted, nextSession, '/api/execute', command('get', { requestId: id }))).json()
+      .body.executionStatus,
+    'failed',
+  );
+  assert.deepEqual(
+    (await call(restarted, nextSession, '/api/execute', command('events', { requestId: id })))
+      .json()
+      .body.items.map((event: { type: string }) => event.type),
+    [
+      'request.created',
+      'delivery.delivered',
+      'decision.approved',
+      'execution.claimed',
+      'execution.failed',
+    ],
+  );
 });
 
 test('playground can fail the next simulated Telegram delivery', async () => {
   const { app } = setup();
   const session = await token(app);
   assert.equal((await call(app, session, '/api/fail-next-delivery', {})).json().armed, true);
-  assert.equal((await app.inject({ method: 'GET', url: '/api/bootstrap' })).json().failNextDelivery, true);
-  const failed = (await call(app, session, '/api/execute', command('create', { payload: input('playground:fail-delivery') }))).json();
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/bootstrap' })).json().failNextDelivery,
+    true,
+  );
+  const failed = (
+    await call(
+      app,
+      session,
+      '/api/execute',
+      command('create', { payload: input('playground:fail-delivery') }),
+    )
+  ).json();
   assert.equal(failed.status, 201);
   const id = failed.body.id as string;
-  const fetched = (await call(app, session, '/api/execute', command('get', { requestId: id }))).json();
+  const fetched = (
+    await call(app, session, '/api/execute', command('get', { requestId: id }))
+  ).json();
   assert.equal(fetched.body.deliveryStatus, 'failed');
-  const listed = (await call(app, session, '/api/execute', command('list', {
-    filters: { status: 'pending', deliveryStatus: 'failed' },
-  }))).json();
-  assert.deepEqual(listed.body.items.map((item: { id: string }) => item.id), [id]);
-  assert.equal((await call(app, session, '/api/decide', {
-    requestId: id, clientId: 'ci-pipeline', decision: 'approve', actor: 'allowed',
-  })).statusCode, 409);
-  const next = (await call(app, session, '/api/execute', command('create', { payload: input('playground:deliver-again') }))).json();
-  assert.equal((await call(app, session, '/api/execute', command('get', { requestId: next.body.id }))).json().body.deliveryStatus, 'delivered');
+  const listed = (
+    await call(
+      app,
+      session,
+      '/api/execute',
+      command('list', {
+        filters: { status: 'pending', deliveryStatus: 'failed' },
+      }),
+    )
+  ).json();
+  assert.deepEqual(
+    listed.body.items.map((item: { id: string }) => item.id),
+    [id],
+  );
+  assert.equal(
+    (
+      await call(app, session, '/api/decide', {
+        requestId: id,
+        clientId: 'ci-pipeline',
+        decision: 'approve',
+        actor: 'allowed',
+      })
+    ).statusCode,
+    409,
+  );
+  const next = (
+    await call(
+      app,
+      session,
+      '/api/execute',
+      command('create', { payload: input('playground:deliver-again') }),
+    )
+  ).json();
+  assert.equal(
+    (await call(app, session, '/api/execute', command('get', { requestId: next.body.id }))).json()
+      .body.deliveryStatus,
+    'delivered',
+  );
 });
 
 test('simulated clock expires pending requests and cancellation stops decisions', async () => {
   const { app } = setup();
   const session = await token(app);
-  const expiring = (await call(app, session, '/api/execute', command('create', { payload: { ...input('playground:expiry'), expiresInSeconds: 60 } }))).json();
+  const expiring = (
+    await call(
+      app,
+      session,
+      '/api/execute',
+      command('create', { payload: { ...input('playground:expiry'), expiresInSeconds: 60 } }),
+    )
+  ).json();
   const id = expiring.body.id as string;
   assert.equal((await call(app, session, '/api/advance-time', { seconds: 61 })).json().expired, 1);
-  assert.equal((await call(app, session, '/api/execute', command('get', { requestId: id }))).json().body.status, 'expired');
-  assert.equal((await call(app, session, '/api/decide', { requestId: id, clientId: 'ci-pipeline', decision: 'approve', actor: 'allowed' })).json().request.status, 'expired');
-  const pending = (await call(app, session, '/api/execute', command('create', { payload: input('playground:cancel') }))).json();
+  assert.equal(
+    (await call(app, session, '/api/execute', command('get', { requestId: id }))).json().body
+      .status,
+    'expired',
+  );
+  assert.equal(
+    (
+      await call(app, session, '/api/decide', {
+        requestId: id,
+        clientId: 'ci-pipeline',
+        decision: 'approve',
+        actor: 'allowed',
+      })
+    ).json().request.status,
+    'expired',
+  );
+  const pending = (
+    await call(
+      app,
+      session,
+      '/api/execute',
+      command('create', { payload: input('playground:cancel') }),
+    )
+  ).json();
   const pendingId = pending.body.id as string;
-  assert.equal((await call(app, session, '/api/execute', command('cancel', { requestId: pendingId }))).json().body.status, 'cancelled');
-  assert.equal((await call(app, session, '/api/decide', { requestId: pendingId, clientId: 'ci-pipeline', decision: 'approve', actor: 'allowed' })).json().request.status, 'cancelled');
+  assert.equal(
+    (await call(app, session, '/api/execute', command('cancel', { requestId: pendingId }))).json()
+      .body.status,
+    'cancelled',
+  );
+  assert.equal(
+    (
+      await call(app, session, '/api/decide', {
+        requestId: pendingId,
+        clientId: 'ci-pipeline',
+        decision: 'approve',
+        actor: 'allowed',
+      })
+    ).json().request.status,
+    'cancelled',
+  );
 });
 
 test('playground issues and revokes scoped keys through simulated HTTP routes', async () => {
   const { app } = setup();
   const session = await token(app);
-  const created = (await call(app, session, '/api/execute', command('keyCreate', {
-    payload: { label: 'Playground reader', scopes: ['requests:read'] },
-  }))).json();
+  const created = (
+    await call(
+      app,
+      session,
+      '/api/execute',
+      command('keyCreate', {
+        payload: { label: 'Playground reader', scopes: ['requests:read'] },
+      }),
+    )
+  ).json();
   assert.equal(created.status, 201);
   assert.equal(created.body.clientId, 'ci-pipeline');
   const keyId = created.body.id as string;
   const scopedKey = created.body.key as string;
-  const listed = (await call(app, session, '/api/execute', command('keyList', { keyPage: { limit: 1 } }))).json();
+  const listed = (
+    await call(app, session, '/api/execute', command('keyList', { keyPage: { limit: 1 } }))
+  ).json();
   assert.equal(listed.status, 200);
-  assert.deepEqual(listed.body.items.map((item: { id: string }) => item.id), [keyId]);
+  assert.deepEqual(
+    listed.body.items.map((item: { id: string }) => item.id),
+    [keyId],
+  );
   assert.doesNotMatch(JSON.stringify(listed), new RegExp(scopedKey));
-  const read = (await call(app, session, '/api/execute', command('list', { auth: 'scoped', scopedKey }))).json();
+  const read = (
+    await call(app, session, '/api/execute', command('list', { auth: 'scoped', scopedKey }))
+  ).json();
   assert.equal(read.status, 200);
-  assert.equal((await call(app, session, '/api/execute', command('create', { auth: 'scoped', scopedKey,
-    payload: input('scoped:denied') }))).json().status, 403);
-  assert.equal((await call(app, session, '/api/execute', command('keyList', { auth: 'scoped', scopedKey }))).json().status, 403);
-  assert.equal((await call(app, session, '/api/execute', command('keyRevoke', { keyId, clientId: 'cloud-ops' }))).json().status, 404);
-  assert.equal((await call(app, session, '/api/execute', command('keyRevoke', { keyId }))).json().status, 200);
-  assert.equal((await call(app, session, '/api/execute', command('list', { auth: 'scoped', scopedKey }))).json().status, 401);
+  assert.equal(
+    (
+      await call(
+        app,
+        session,
+        '/api/execute',
+        command('create', { auth: 'scoped', scopedKey, payload: input('scoped:denied') }),
+      )
+    ).json().status,
+    403,
+  );
+  assert.equal(
+    (
+      await call(app, session, '/api/execute', command('keyList', { auth: 'scoped', scopedKey }))
+    ).json().status,
+    403,
+  );
+  assert.equal(
+    (
+      await call(
+        app,
+        session,
+        '/api/execute',
+        command('keyRevoke', { keyId, clientId: 'cloud-ops' }),
+      )
+    ).json().status,
+    404,
+  );
+  assert.equal(
+    (await call(app, session, '/api/execute', command('keyRevoke', { keyId }))).json().status,
+    200,
+  );
+  assert.equal(
+    (
+      await call(app, session, '/api/execute', command('list', { auth: 'scoped', scopedKey }))
+    ).json().status,
+    401,
+  );
 });
 
 test('playground can inspect key expiry and client audit records in simulation', async () => {
   const { app } = setup();
-  const boot = (await app.inject({ method: 'GET', url: '/api/bootstrap' })).json() as { token: string; simulatedNow: string };
+  const boot = (await app.inject({ method: 'GET', url: '/api/bootstrap' })).json() as {
+    token: string;
+    simulatedNow: string;
+  };
   const expiresAt = new Date(Date.parse(boot.simulatedNow) + 60_000).toISOString();
-  const issued = (await call(app, boot.token, '/api/execute', command('keyCreate', {
-    payload: { label: 'Temporary creator', scopes: ['requests:create'], expiresAt },
-  }))).json();
+  const issued = (
+    await call(
+      app,
+      boot.token,
+      '/api/execute',
+      command('keyCreate', {
+        payload: { label: 'Temporary creator', scopes: ['requests:create'], expiresAt },
+      }),
+    )
+  ).json();
   assert.equal(issued.status, 201);
   assert.equal(issued.body.expiresAt, expiresAt);
   const scopedKey = issued.body.key as string;
-  const created = (await call(app, boot.token, '/api/execute', command('create', {
-    auth: 'scoped', scopedKey, payload: input('playground:audit'),
-  }))).json();
+  const created = (
+    await call(
+      app,
+      boot.token,
+      '/api/execute',
+      command('create', {
+        auth: 'scoped',
+        scopedKey,
+        payload: input('playground:audit'),
+      }),
+    )
+  ).json();
   assert.equal(created.status, 201);
-  const audit = (await call(app, boot.token, '/api/execute', command('audit', {
-    auditPage: { keyId: issued.body.id, limit: 1 },
-  }))).json();
+  const audit = (
+    await call(
+      app,
+      boot.token,
+      '/api/execute',
+      command('audit', {
+        auditPage: { keyId: issued.body.id, limit: 1 },
+      }),
+    )
+  ).json();
   assert.equal(audit.status, 200);
   assert.equal(audit.body.items[0].type, 'request.created');
   assert.equal(audit.body.items[0].actorKeyId, issued.body.id);
   assert.ok(audit.body.nextCursor);
-  const older = (await call(app, boot.token, '/api/execute', command('audit', {
-    auditPage: { keyId: issued.body.id, limit: 1, cursor: audit.body.nextCursor },
-  }))).json();
+  const older = (
+    await call(
+      app,
+      boot.token,
+      '/api/execute',
+      command('audit', {
+        auditPage: { keyId: issued.body.id, limit: 1, cursor: audit.body.nextCursor },
+      }),
+    )
+  ).json();
   assert.equal(older.body.items[0].type, 'key.issued');
-  assert.deepEqual((await call(app, boot.token, '/api/execute', command('audit', { clientId: 'cloud-ops' }))).json().body.items, []);
-  assert.equal((await call(app, boot.token, '/api/execute', command('audit', { auth: 'scoped', scopedKey }))).json().status, 403);
+  assert.deepEqual(
+    (
+      await call(app, boot.token, '/api/execute', command('audit', { clientId: 'cloud-ops' }))
+    ).json().body.items,
+    [],
+  );
+  assert.equal(
+    (
+      await call(app, boot.token, '/api/execute', command('audit', { auth: 'scoped', scopedKey }))
+    ).json().status,
+    403,
+  );
   assert.doesNotMatch(JSON.stringify(audit), new RegExp(scopedKey));
-  assert.equal((await call(app, boot.token, '/api/advance-time', { seconds: 60 })).json().expired >= 0, true);
-  assert.equal((await call(app, boot.token, '/api/execute', command('create', {
-    auth: 'scoped', scopedKey, payload: input('playground:expired-key'),
-  }))).json().status, 401);
+  assert.equal(
+    (await call(app, boot.token, '/api/advance-time', { seconds: 60 })).json().expired >= 0,
+    true,
+  );
+  assert.equal(
+    (
+      await call(
+        app,
+        boot.token,
+        '/api/execute',
+        command('create', {
+          auth: 'scoped',
+          scopedKey,
+          payload: input('playground:expired-key'),
+        }),
+      )
+    ).json().status,
+    401,
+  );
 });
 
 test('live mode keeps client keys in the backend while calling the real HTTP routes', async () => {
@@ -254,32 +702,109 @@ test('live mode keeps client keys in the backend while calling the real HTTP rou
   const gateway = createHttpServer(new GatewayCore(db), new Map([['website', key]]), () => true);
   try {
     const fetcher: typeof fetch = async (url, init) => {
-      const response = await gateway.inject({ method: (init?.method ?? 'GET') as 'GET' | 'POST',
-        url: new URL(String(url)).pathname + new URL(String(url)).search, headers: init?.headers as Record<string, string>,
-        ...(init?.body ? { payload: String(init.body) } : {}) });
-      return new Response(response.body, { status: response.statusCode, headers: { 'content-type': 'application/json' } });
+      const response = await gateway.inject({
+        method: (init?.method ?? 'GET') as 'GET' | 'POST',
+        url: new URL(String(url)).pathname + new URL(String(url)).search,
+        headers: init?.headers as Record<string, string>,
+        ...(init?.body ? { payload: String(init.body) } : {}),
+      });
+      return new Response(response.body, {
+        status: response.statusCode,
+        headers: { 'content-type': 'application/json' },
+      });
     };
-    const app = createPlayground({ databasePath: join(dir, 'playground.sqlite'), liveClientKeys: new Map([['website', key]]), fetcher });
+    const app = createPlayground({
+      databasePath: join(dir, 'playground.sqlite'),
+      liveClientKeys: new Map([['website', key]]),
+      fetcher,
+    });
     apps.push(app);
     const boot = (await app.inject({ method: 'GET', url: '/api/bootstrap' })).json();
     assert.deepEqual(boot.liveClients, ['website']);
     assert.equal(JSON.stringify(boot).includes(key), false);
-    const created = (await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'create', payload: input('live:test') })).json();
+    const created = (
+      await call(app, boot.token, '/api/execute', {
+        mode: 'live',
+        clientId: 'website',
+        operation: 'create',
+        payload: input('live:test'),
+      })
+    ).json();
     assert.equal(created.status, 201);
     assert.equal(created.body.clientId, 'website');
-    const listed = (await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'list', filters: { status: 'pending', limit: 1 } })).json();
+    const listed = (
+      await call(app, boot.token, '/api/execute', {
+        mode: 'live',
+        clientId: 'website',
+        operation: 'list',
+        filters: { status: 'pending', limit: 1 },
+      })
+    ).json();
     assert.equal(listed.status, 200);
-    assert.deepEqual(listed.body.items.map((item: { id: string }) => item.id), [created.body.id]);
-    assert.equal((await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'get', requestId: created.body.id, auth: 'missing' })).json().status, 401);
-    const events = (await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'events', requestId: created.body.id })).json();
+    assert.deepEqual(
+      listed.body.items.map((item: { id: string }) => item.id),
+      [created.body.id],
+    );
+    assert.equal(
+      (
+        await call(app, boot.token, '/api/execute', {
+          mode: 'live',
+          clientId: 'website',
+          operation: 'get',
+          requestId: created.body.id,
+          auth: 'missing',
+        })
+      ).json().status,
+      401,
+    );
+    const events = (
+      await call(app, boot.token, '/api/execute', {
+        mode: 'live',
+        clientId: 'website',
+        operation: 'events',
+        requestId: created.body.id,
+      })
+    ).json();
     assert.equal(events.status, 200);
-    assert.deepEqual(events.body.items.map((event: { type: string }) => event.type), ['request.created']);
-    const issued = (await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'keyCreate',
-      payload: { label: 'Live reader', scopes: ['requests:read'] } })).json();
+    assert.deepEqual(
+      events.body.items.map((event: { type: string }) => event.type),
+      ['request.created'],
+    );
+    const issued = (
+      await call(app, boot.token, '/api/execute', {
+        mode: 'live',
+        clientId: 'website',
+        operation: 'keyCreate',
+        payload: { label: 'Live reader', scopes: ['requests:read'] },
+      })
+    ).json();
     assert.equal(issued.status, 201);
-    assert.equal((await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'get',
-      requestId: created.body.id, auth: 'scoped', scopedKey: issued.body.key })).json().status, 200);
-    assert.equal((await call(app, boot.token, '/api/execute', { mode: 'live', clientId: 'website', operation: 'keyRevoke',
-      keyId: issued.body.id })).json().status, 200);
-  } finally { await gateway.close(); db.close(); }
+    assert.equal(
+      (
+        await call(app, boot.token, '/api/execute', {
+          mode: 'live',
+          clientId: 'website',
+          operation: 'get',
+          requestId: created.body.id,
+          auth: 'scoped',
+          scopedKey: issued.body.key,
+        })
+      ).json().status,
+      200,
+    );
+    assert.equal(
+      (
+        await call(app, boot.token, '/api/execute', {
+          mode: 'live',
+          clientId: 'website',
+          operation: 'keyRevoke',
+          keyId: issued.body.id,
+        })
+      ).json().status,
+      200,
+    );
+  } finally {
+    await gateway.close();
+    db.close();
+  }
 });

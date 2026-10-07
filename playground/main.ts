@@ -32,4 +32,7 @@ async function close() {
   await vite.close();
   await app.close();
 }
-for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void close(); });
+for (const signal of ['SIGINT', 'SIGTERM'] as const)
+  process.once(signal, () => {
+    void close();
+  });

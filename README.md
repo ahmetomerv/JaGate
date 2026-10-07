@@ -42,7 +42,7 @@ Client app → performs its own action → reports the result
 
 ## Developing
 
-Follow the [local setup guide](https://ahmetomerv.github.io/JaGate/guide/getting-started.html). Node.js 24.21.0 is required. From the repository root, `npm ci` then `npm run verify` runs typecheck, tests, lint, and the server, docs, and playground builds.
+Follow the [local setup guide](https://ahmetomerv.github.io/JaGate/guide/getting-started.html). Node.js 24.21.0 is required. From the repository root, `npm ci` then `npm run verify` runs typecheck, tests, lint, the format check, and the server, docs, and playground builds.
 
 `npm run demo:fake` walks through one approval with an in-memory database and a fake Telegram transport.
 

@@ -47,6 +47,8 @@ export default defineConfig({
     ],
     socialLinks: [{ icon: 'github', link: 'https://github.com/ahmetomerv/JaGate' }],
     editLink: { pattern: 'https://github.com/ahmetomerv/JaGate/edit/main/docs/:path' },
-    footer: { message: 'MIT licensed. JaGate coordinates approval; your application performs the action.' },
+    footer: {
+      message: 'MIT licensed. JaGate coordinates approval; your application performs the action.',
+    },
   },
 });
