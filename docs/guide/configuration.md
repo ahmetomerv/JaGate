@@ -2,15 +2,15 @@
 
 JaGate reads configuration from environment variables. The local walkthrough uses Node's `--env-file=.env`; Docker Compose reads the same file through `env_file`. There is no unauthenticated API mode.
 
-| Variable | Required | Meaning |
-| --- | --- | --- |
-| `CLIENT_KEYS` | Yes | Comma-separated `clientId:key` bootstrap credentials. Each client gets one configured bootstrap key and may issue scoped keys through the API. |
-| `TELEGRAM_BOT_TOKEN` | Yes | Token for a dedicated bot from BotFather. |
-| `TELEGRAM_ROUTES` | Yes for multiple clients | JSON object keyed by client ID. Each value has a distinct numeric `chatId` string and a nonempty `approverIds` array of numeric user ID strings. |
+| Variable                                    | Required                         | Meaning                                                                                                                                                            |
+| ------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CLIENT_KEYS`                               | Yes                              | Comma-separated `clientId:key` bootstrap credentials. Each client gets one configured bootstrap key and may issue scoped keys through the API.                     |
+| `TELEGRAM_BOT_TOKEN`                        | Yes                              | Token for a dedicated bot from BotFather.                                                                                                                          |
+| `TELEGRAM_ROUTES`                           | Yes for multiple clients         | JSON object keyed by client ID. Each value has a distinct numeric `chatId` string and a nonempty `approverIds` array of numeric user ID strings.                   |
 | `TELEGRAM_CHAT_ID`, `TELEGRAM_APPROVER_IDS` | Legacy single-client alternative | One numeric destination chat ID and comma-separated numeric approver IDs. Use only when `CLIENT_KEYS` contains exactly one client and `TELEGRAM_ROUTES` is absent. |
-| `DATABASE_PATH` | No | SQLite path; defaults to `./data/gateway.sqlite`. |
-| `HOST` | No | HTTP bind address; defaults to `127.0.0.1`. |
-| `PORT` | No | HTTP port; defaults to `3080`. |
+| `DATABASE_PATH`                             | No                               | SQLite path; defaults to `./data/gateway.sqlite`.                                                                                                                  |
+| `HOST`                                      | No                               | HTTP bind address; defaults to `127.0.0.1`.                                                                                                                        |
+| `PORT`                                      | No                               | HTTP port; defaults to `3080`.                                                                                                                                     |
 
 Generate a separate key for each application with `openssl rand -hex 32`. Client IDs must start with a lowercase letter, use only lowercase letters, digits, `_`, or `-`, and be no more than 32 characters. Keys must be unique, 32–128 URL-safe characters. Up to 32 clients can be configured. Do not include spaces in the comma-separated value.
 

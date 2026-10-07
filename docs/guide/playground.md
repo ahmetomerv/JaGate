@@ -14,20 +14,20 @@ npm run playground
 
 Open `http://127.0.0.1:5173`. The default **Simulated Telegram** mode needs no `.env`, bot, network connection, or running gateway. It uses `data/playground.sqlite`, separate from the normal `data/gateway.sqlite` database. A **client** is an application or automation that calls JaGate, not a human approver. The header chooses the environment, the client, and **Calling as** (the bootstrap key, an issued key, a missing key, or an invalid key). Four sections follow the product rather than a list of routes:
 
-| Section | What you do there |
-| --- | --- |
+| Section           | What you do there                                                                                          |
+| ----------------- | ---------------------------------------------------------------------------------------------------------- |
 | **This approval** | Ask for an approval, decide it in a simulated Telegram chat, claim it, and report what the application did |
-| **All requests** | Filter this client's requests, including failed delivery, old claims, and approvals that expire soon |
-| **Keys** | Issue, list, and revoke scoped keys, then read the audit log |
-| **Gateway** | Check public health and readiness |
+| **All requests**  | Filter this client's requests, including failed delivery, old claims, and approvals that expire soon       |
+| **Keys**          | Issue, list, and revoke scoped keys, then read the audit log                                               |
+| **Gateway**       | Check public health and readiness                                                                          |
 
 The three simulated clients are:
 
-| Client ID | Calling system | Sample approval |
-| --- | --- | --- |
-| `ci-pipeline` | CI/CD pipeline | Deploy an API release to production |
-| `cloud-ops` | Cloud operations tool | Delete an old database snapshot |
-| `billing-service` | Billing service | Issue a high-value customer refund |
+| Client ID         | Calling system        | Sample approval                     |
+| ----------------- | --------------------- | ----------------------------------- |
+| `ci-pipeline`     | CI/CD pipeline        | Deploy an API release to production |
+| `cloud-ops`       | Cloud operations tool | Delete an old database snapshot     |
+| `billing-service` | Billing service       | Issue a high-value customer refund  |
 
 Each client has its own simulated key, requests, Telegram chat, and approver. **This approval** opens on that client's example. The fields stay editable. JaGate handles approval only: the simulator does not deploy, delete, or refund anything. Stop the playground with Ctrl+C. Request history and the simulated clock offset remain in its database across restarts. Requests created with older playground versions under `website` or `backups` remain in that database, but are not shown under the new example clients.
 

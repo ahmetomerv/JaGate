@@ -21,13 +21,13 @@ curl -sS -X POST http://127.0.0.1:3080/v1/client-keys \
 
 The response is HTTP 201 and includes `id`, `clientId`, `label`, `scopes`, `createdAt`, `expiresAt`, `revokedAt: null`, and the generated `key`. **The raw `key` is returned only on creation.** Store it privately; listing or revoking a key never returns it. `expiresAt` is optional: omit it for no expiry, or replace the example date with a future UTC ISO 8601 timestamp with a `Z` suffix and at most three fractional second digits. A past or current expiry returns 400 `invalid_input`. Expiry is checked on each API request; at the deadline the issued key returns 401 `unauthorized`, even if its scopes include the route. The bootstrap key is unaffected. Labels are 1–80 characters after trimming, without control characters. `scopes` must be a nonempty, duplicate-free array of these values:
 
-| Scope | Routes allowed |
-| --- | --- |
-| `requests:create` | `POST /v1/requests` |
-| `requests:read` | `GET /v1/requests`, `GET /v1/requests/:id`, `GET /v1/requests/:id/events` |
-| `requests:cancel` | `POST /v1/requests/:id/cancel` |
-| `requests:claim` | `POST /v1/requests/:id/claim` |
-| `requests:result` | `POST /v1/requests/:id/result` |
+| Scope             | Routes allowed                                                            |
+| ----------------- | ------------------------------------------------------------------------- |
+| `requests:create` | `POST /v1/requests`                                                       |
+| `requests:read`   | `GET /v1/requests`, `GET /v1/requests/:id`, `GET /v1/requests/:id/events` |
+| `requests:cancel` | `POST /v1/requests/:id/cancel`                                            |
+| `requests:claim`  | `POST /v1/requests/:id/claim`                                             |
+| `requests:result` | `POST /v1/requests/:id/result`                                            |
 
 Scopes authorize routes; normal request state checks and the one-time claim token still apply. An issued key cannot create, list, or revoke client keys or read the audit feed. A missing, expired, or revoked key returns 401 `unauthorized`; a valid key lacking a route's scope returns 403 `insufficient_scope`. A key from another client still gets 404 `not_found` for a request or issued-key ID it does not own. Issued keys work only while their client ID remains configured in `CLIENT_KEYS`.
 
@@ -55,7 +55,20 @@ curl -sS 'http://127.0.0.1:3080/v1/audit-events?limit=20' \
 Each event has a numeric `id`, `type`, `occurredAt`, `actor`, `actorKeyId`, `requestId`, and `subjectKeyId`. `actor` is `bootstrap` or `issued_key`; only the latter has an `actorKeyId`. Issuance and revocation have the affected key ID in `subjectKeyId`. Other event types have the request ID in `requestId`. For example:
 
 ```json
-{"items":[{"id":2,"type":"request.created","occurredAt":"2026-10-05T12:00:00.000Z","actor":"issued_key","actorKeyId":"123e4567-e89b-42d3-a456-426614174000","requestId":"123e4567-e89b-42d3-a456-426614174001","subjectKeyId":null}],"nextCursor":null}
+{
+  "items": [
+    {
+      "id": 2,
+      "type": "request.created",
+      "occurredAt": "2026-10-05T12:00:00.000Z",
+      "actor": "issued_key",
+      "actorKeyId": "123e4567-e89b-42d3-a456-426614174000",
+      "requestId": "123e4567-e89b-42d3-a456-426614174001",
+      "subjectKeyId": null
+    }
+  ],
+  "nextCursor": null
+}
 ```
 
 Results are newest first. `limit` is 1–100 (default 20); use `nextCursor` as `cursor` with the same filters for later pages. Optional `requestId` filters to one request and `keyId` matches either an acting or affected issued key. Both are UUIDs and combine with AND. Invalid or unknown query parameters return 400 `invalid_input`. Audit rows contain only IDs and timestamps, never raw keys, key hashes, claim tokens, request content, or result summaries. They are appended in the same SQLite transaction as the recorded action, persist after expiry or revocation, and are not backfilled for actions that occurred before migration 006. The TypeScript client exposes `listAuditEvents` for bootstrap-key use.
@@ -117,15 +130,15 @@ The client ID, action, title, description, details, metadata, creation time, and
 
 `GET /v1/requests` returns only requests owned by the bearer key's client. Results are ordered by `createdAt` descending, then `id` descending. All filters are optional and combine with AND:
 
-| Query parameter | Values | Default |
-| --- | --- | --- |
-| `status` | `pending`, `approved`, `rejected`, `expired`, `cancelled` | any |
-| `deliveryStatus` | `pending`, `retrying`, `delivered`, `failed` | any |
-| `executionStatus` | `unclaimed`, `claimed`, `succeeded`, `failed` | any |
-| `claimedBefore` | UTC ISO 8601 timestamp; `claimedAt` strictly earlier | any |
-| `expiresBefore` | UTC ISO 8601 timestamp; `expiresAt` strictly earlier | any |
-| `limit` | integer from 1 to 100 | 20 |
-| `cursor` | opaque `nextCursor` from the previous page | first page |
+| Query parameter   | Values                                                    | Default    |
+| ----------------- | --------------------------------------------------------- | ---------- |
+| `status`          | `pending`, `approved`, `rejected`, `expired`, `cancelled` | any        |
+| `deliveryStatus`  | `pending`, `retrying`, `delivered`, `failed`              | any        |
+| `executionStatus` | `unclaimed`, `claimed`, `succeeded`, `failed`             | any        |
+| `claimedBefore`   | UTC ISO 8601 timestamp; `claimedAt` strictly earlier      | any        |
+| `expiresBefore`   | UTC ISO 8601 timestamp; `expiresAt` strictly earlier      | any        |
+| `limit`           | integer from 1 to 100                                     | 20         |
+| `cursor`          | opaque `nextCursor` from the previous page                | first page |
 
 ```sh
 curl -sS 'http://127.0.0.1:3080/v1/requests?status=pending&limit=20' \
@@ -168,9 +181,27 @@ curl -sS "http://127.0.0.1:3080/v1/requests/$REQUEST_ID/events?limit=50" \
 ```json
 {
   "items": [
-    { "sequence": 1, "type": "request.created", "occurredAt": "2026-09-24T12:00:00.000Z", "actorId": null, "attempt": null },
-    { "sequence": 2, "type": "delivery.delivered", "occurredAt": "2026-09-24T12:00:01.000Z", "actorId": null, "attempt": 1 },
-    { "sequence": 3, "type": "decision.approved", "occurredAt": "2026-09-24T12:01:00.000Z", "actorId": "7", "attempt": null }
+    {
+      "sequence": 1,
+      "type": "request.created",
+      "occurredAt": "2026-09-24T12:00:00.000Z",
+      "actorId": null,
+      "attempt": null
+    },
+    {
+      "sequence": 2,
+      "type": "delivery.delivered",
+      "occurredAt": "2026-09-24T12:00:01.000Z",
+      "actorId": null,
+      "attempt": 1
+    },
+    {
+      "sequence": 3,
+      "type": "decision.approved",
+      "occurredAt": "2026-09-24T12:01:00.000Z",
+      "actorId": "7",
+      "attempt": null
+    }
   ],
   "nextCursor": null
 }
@@ -186,13 +217,13 @@ The TypeScript client exposes `getRequestEvents(id, { limit, cursor })` with `Re
 
 ## Read, cancel, claim, and report
 
-| Route | Body | Success | Common errors |
-| --- | --- | --- | --- |
-| `GET /v1/requests/:id` | none | 200 request | 404 |
-| `GET /v1/requests/:id/events` | none | 200 timeline page | 400, 404 |
-| `POST /v1/requests/:id/cancel` | `{}` | 200 request; only while pending | 409, 404 |
-| `POST /v1/requests/:id/claim` | `{}` | 200 claim object; only approved and unclaimed | 409, 404 |
-| `POST /v1/requests/:id/result` | see below | 200 request; only from claimant, once | 403, 409, 404 |
+| Route                          | Body      | Success                                       | Common errors |
+| ------------------------------ | --------- | --------------------------------------------- | ------------- |
+| `GET /v1/requests/:id`         | none      | 200 request                                   | 404           |
+| `GET /v1/requests/:id/events`  | none      | 200 timeline page                             | 400, 404      |
+| `POST /v1/requests/:id/cancel` | `{}`      | 200 request; only while pending               | 409, 404      |
+| `POST /v1/requests/:id/claim`  | `{}`      | 200 claim object; only approved and unclaimed | 409, 404      |
+| `POST /v1/requests/:id/result` | see below | 200 request; only from claimant, once         | 403, 409, 404 |
 
 Use the `id` returned by creation. These requests all require the same client's bearer key. The examples below use `REQUEST_ID` as a shell variable:
 
@@ -230,7 +261,11 @@ Claim response:
 {
   "claimId": "9a5ca158-3ab6-4abe-92b6-f18c10c47463",
   "claimToken": "base64url-secret-returned-once",
-  "request": { "id": "123e4567-e89b-42d3-a456-426614174000", "status": "approved", "executionStatus": "claimed" }
+  "request": {
+    "id": "123e4567-e89b-42d3-a456-426614174000",
+    "status": "approved",
+    "executionStatus": "claimed"
+  }
 }
 ```
 

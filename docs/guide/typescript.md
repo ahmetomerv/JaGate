@@ -47,12 +47,16 @@ try {
       await writeFile(file, `Approved ${revision}\n`, { flag: 'wx' });
     } catch (error) {
       await client.reportResult(request.id, {
-        claimToken, status: 'failed', summary: 'Local file write failed',
+        claimToken,
+        status: 'failed',
+        summary: 'Local file write failed',
       });
       throw error;
     }
     await client.reportResult(request.id, {
-      claimToken, status: 'succeeded', summary: 'Local file written',
+      claimToken,
+      status: 'succeeded',
+      summary: 'Local file written',
     });
     console.log(file);
   }
@@ -69,20 +73,20 @@ The calling app owns the action and its credentials. It should execute the exact
 
 ## Client methods
 
-| Method | Purpose |
-| --- | --- |
-| `createRequest(input, signal?)` | Create a request, or retrieve an exact idempotent repeat. |
-| `listRequests({ status, deliveryStatus, executionStatus, claimedBefore, expiresBefore, limit, cursor }?, signal?)` | Browse this client's requests, newest first; use UTC cutoffs for attention queries. |
-| `getRequest(id, signal?)` | Read one request owned by this client. |
-| `getRequestEvents(id, { limit, cursor }?, signal?)` | Read the request's recorded gateway events, oldest first. Follow `nextCursor` for later pages. |
-| `waitForDecision(id, { timeoutMs, signal? })` | Poll until decision is no longer pending. |
-| `cancel(id, signal?)` | Cancel a still-pending request. |
-| `claim(id, signal?)` | Atomically claim an approved, unclaimed request. |
-| `reportResult(id, { claimToken, status, summary }, signal?)` | Record a claimant-reported outcome. |
-| `createClientKey({ label, scopes, expiresAt? }, signal?)` | Use a bootstrap key to issue a scoped key with optional UTC expiry; returns the raw key once. |
-| `listClientKeys({ limit, cursor }?, signal?)` | Use a bootstrap key to list issued-key metadata without secrets. |
-| `revokeClientKey(id, signal?)` | Use a bootstrap key to revoke an issued key immediately. |
-| `listAuditEvents({ limit, cursor, requestId, keyId }?, signal?)` | Use a bootstrap key to read this client's attribution events, newest first. |
+| Method                                                                                                             | Purpose                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `createRequest(input, signal?)`                                                                                    | Create a request, or retrieve an exact idempotent repeat.                                      |
+| `listRequests({ status, deliveryStatus, executionStatus, claimedBefore, expiresBefore, limit, cursor }?, signal?)` | Browse this client's requests, newest first; use UTC cutoffs for attention queries.            |
+| `getRequest(id, signal?)`                                                                                          | Read one request owned by this client.                                                         |
+| `getRequestEvents(id, { limit, cursor }?, signal?)`                                                                | Read the request's recorded gateway events, oldest first. Follow `nextCursor` for later pages. |
+| `waitForDecision(id, { timeoutMs, signal? })`                                                                      | Poll until decision is no longer pending.                                                      |
+| `cancel(id, signal?)`                                                                                              | Cancel a still-pending request.                                                                |
+| `claim(id, signal?)`                                                                                               | Atomically claim an approved, unclaimed request.                                               |
+| `reportResult(id, { claimToken, status, summary }, signal?)`                                                       | Record a claimant-reported outcome.                                                            |
+| `createClientKey({ label, scopes, expiresAt? }, signal?)`                                                          | Use a bootstrap key to issue a scoped key with optional UTC expiry; returns the raw key once.  |
+| `listClientKeys({ limit, cursor }?, signal?)`                                                                      | Use a bootstrap key to list issued-key metadata without secrets.                               |
+| `revokeClientKey(id, signal?)`                                                                                     | Use a bootstrap key to revoke an issued key immediately.                                       |
+| `listAuditEvents({ limit, cursor, requestId, keyId }?, signal?)`                                                   | Use a bootstrap key to read this client's attribution events, newest first.                    |
 
 To inspect requests without creating or acting on them, issue a separate key with only `requests:read` and construct an `ApprovalClient` with that key. The same client ID can list its requests and inspect an individual request's events:
 
@@ -94,7 +98,10 @@ const reader = new ApprovalClient({
 const page = await reader.listRequests({ status: 'approved', limit: 20 });
 for (const request of page.items) {
   const timeline = await reader.getRequestEvents(request.id, { limit: 50 });
-  console.log(request.id, timeline.items.map((event) => event.type));
+  console.log(
+    request.id,
+    timeline.items.map((event) => event.type),
+  );
 }
 // If page.nextCursor is non-null, pass it as cursor with the same filters and limit.
 // Do the same with timeline.nextCursor to fetch later events for a request.
@@ -109,7 +116,11 @@ const now = Date.now();
 const oldClaimCutoff = new Date(now - 10 * 60_000).toISOString();
 const expiryCutoff = new Date(now + 10 * 60_000).toISOString();
 const failedDeliveries = await reader.listRequests({ status: 'pending', deliveryStatus: 'failed' });
-const oldClaims = await reader.listRequests({ status: 'approved', executionStatus: 'claimed', claimedBefore: oldClaimCutoff });
+const oldClaims = await reader.listRequests({
+  status: 'approved',
+  executionStatus: 'claimed',
+  claimedBefore: oldClaimCutoff,
+});
 const expiring = await reader.listRequests({ status: 'pending', expiresBefore: expiryCutoff });
 // If oldClaims.nextCursor exists, pass it with the same filters and oldClaimCutoff.
 ```
@@ -131,7 +142,9 @@ const worker = await admin.createClientKey({
 });
 // Save worker.key securely now; listClientKeys only returns its ID and metadata.
 const audit = await admin.listAuditEvents({ keyId: worker.id, limit: 20 });
-console.log(audit.items.map(({ type, actorKeyId, requestId }) => ({ type, actorKeyId, requestId })));
+console.log(
+  audit.items.map(({ type, actorKeyId, requestId }) => ({ type, actorKeyId, requestId })),
+);
 ```
 
 The audit feed records only key IDs for successful creates, claims, reports, issuances, and revocations. It does not contain key secrets or claim tokens. See [Client audit events](/API#client-audit-events) for the event shape and filters.
