@@ -12,7 +12,7 @@ docker compose up --build -d
 curl -i http://127.0.0.1:3080/ready
 ```
 
-The Compose file sets `HOST=0.0.0.0` **inside** the container so the host's loopback port can reach it. The host-facing port remains bound to `127.0.0.1`. View startup or delivery errors with `docker compose logs gateway`. Use a dedicated bot: an existing webhook or concurrent poller prevents normal startup.
+The Compose file sets `HOST=0.0.0.0` **inside** the container so the host's loopback port can reach it. The host-facing port remains bound to `127.0.0.1`. The image also serves the [operator console](/guide/console) on that same port. View startup or delivery errors with `docker compose logs gateway`. Use a dedicated bot: an existing webhook or concurrent poller prevents normal startup.
 
 For an end-to-end action test, install the repository's development dependencies on your host with `npm ci`, load the `example` client key as shown in [Get started locally](/guide/getting-started), and run `node --import tsx examples/demo.ts`. The demo calls the container's API through the loopback port; after approval it writes a local temporary file on your host.
 

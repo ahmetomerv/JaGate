@@ -19,6 +19,7 @@ Read the [**JaGate documentation**](https://ahmetomerv.github.io/JaGate/) for se
 - **Any language.** Use the HTTP API, or the included TypeScript client.
 - **Durable state.** Proposals, delivery, decisions, and claims are stored in SQLite and survive restarts.
 - **Request timeline.** Inspect each request's durable delivery, decision, and reported execution events.
+- **Operator console.** Review one client's requests, timeline, issued keys, and audit events in the browser. Decisions stay in Telegram.
 
 For the full picture, see the [documentation](https://ahmetomerv.github.io/JaGate/).
 

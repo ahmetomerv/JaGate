@@ -40,7 +40,7 @@ export default antfu(
     },
   },
   {
-    files: ['test/**/*.ts', 'playground/**/*.ts', 'playground/**/*.vue'],
+    files: ['test/**/*.ts', 'playground/**/*.ts', 'playground/**/*.vue', 'console/**/*.vue'],
     rules: {
       'ts/explicit-function-return-type': 'off',
     },

@@ -6,7 +6,9 @@ RUN npm ci --no-audit --no-fund
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 COPY migrations ./migrations
-RUN npm run build && npm prune --omit=dev
+COPY assets ./assets
+COPY console ./console
+RUN npm run build && npm run console:build && npm prune --omit=dev
 
 FROM node:24.21.0-bookworm-slim
 ENV NODE_ENV=production

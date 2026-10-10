@@ -1,0 +1,136 @@
+@import 'element-plus/dist/index.css';
+@import 'element-plus/theme-chalk/dark/css-vars.css';
+
+html.dark {
+  --el-color-primary: #ff5a1f;
+  --el-color-primary-light-3: #ff7d4d;
+  --el-color-primary-light-5: #ff9d73;
+  --el-color-primary-light-7: #ffbea3;
+  --el-color-primary-light-8: #ffd0bb;
+  --el-color-primary-light-9: #3a2218;
+  --el-color-primary-dark-2: #cc4818;
+  --el-bg-color: #161616;
+  --el-bg-color-page: #111111;
+  --el-bg-color-overlay: #1c1c1c;
+  --el-fill-color-blank: #161616;
+  color-scheme: dark;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  background: #111;
+}
+
+body {
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Helvetica,
+    Arial,
+    sans-serif;
+}
+
+.console-shell {
+  min-height: 100%;
+}
+
+.console-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--el-border-color);
+  background: #111;
+}
+
+.console-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 120px;
+}
+
+.console-brand-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.console-logo {
+  width: 28px;
+  height: 28px;
+  flex: none;
+}
+
+.console-nav {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+
+.console-main,
+.console-sign-in {
+  width: min(1100px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 24px 0 48px;
+}
+
+.console-sign-in {
+  display: grid;
+  min-height: 100%;
+  align-content: center;
+}
+
+.console-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.console-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.console-row > .el-form-item {
+  margin-bottom: 0;
+}
+
+.console-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.console-table {
+  width: 100%;
+}
+
+.console-request-table {
+  cursor: pointer;
+}
+
+.el-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.console-muted {
+  color: var(--el-text-color-secondary);
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}

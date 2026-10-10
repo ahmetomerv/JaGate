@@ -27,3 +27,11 @@ Request creation is durable before Telegram delivery. Transient delivery errors 
 On startup, JaGate checks access to every configured chat. If a client's chat ID changed, still-pending delivered requests are requeued with new buttons for the new chat. Old buttons become invalid. If only the approver list changes, the new list governs existing pending buttons after restart. Already-settled decisions are not reopened. See [Configuration and clients](/guide/configuration#changing-a-destination-or-approvers).
 
 Keep the SQLite data volume and backups private. Use SQLite's online backup API while the gateway runs; see [Docker Compose backups](/guide/docker#back-up-sqlite). Test restores. Run only one JaGate instance with a given database and bot token.
+
+## Operator console
+
+The console is static files served by the gateway on the same origin as the API. Anyone who can open the port can load the HTML and JavaScript. Those files contain no keys. Every `/v1` call still requires a bearer key typed into the page. The key stays in memory for that tab and is dropped on sign-out, refresh, or a 401. Do not put a key in the console build, a Vite environment variable, browser storage, or the address bar.
+
+Use an issued key with `requests:read` for daily viewing. Add `requests:cancel` only when that browser should cancel pending requests. Key issuance, revocation, and the audit feed require the bootstrap key. The console has no control that approves, rejects, claims, or reports a result. A claimed request with no reported result is shown as an unknown external outcome.
+
+Metadata is visible in the console and was not sent to Telegram. Treat the console like the API: loopback by default, and a private network or authenticated TLS reverse proxy if a remote operator must reach it. Responses send a content security policy that keeps scripts on this origin, plus `nosniff`, `no-referrer`, and framing denial. Request text is rendered as text.

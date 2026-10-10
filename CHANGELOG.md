@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added an operator console on the gateway origin for one client's request inbox, timeline, issued keys, and audit feed. Decisions stay in Telegram; the console does not claim or report results.
 - Added optional issued-key expiry and a client-scoped audit feed for successful key management and request create, claim, and result actions; audit records contain key IDs, never secrets.
 - Added client-scoped attention filters for claims older than a UTC cutoff and approvals expiring before one, with playground shortcuts for those and failed Telegram delivery.
 - Added scenario guides for deployment approval, backup deletion approval, and reconciliation after a claimed request's caller crashes.

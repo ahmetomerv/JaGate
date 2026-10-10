@@ -1,11 +1,27 @@
-/* Layout and type. Inputs and selects keep the browser's native controls. */
+@import 'element-plus/dist/index.css';
+@import 'element-plus/theme-chalk/dark/css-vars.css';
+
+html.dark {
+  --el-color-primary: #ff5a1f;
+  --el-color-primary-light-3: #ff7d4d;
+  --el-color-primary-light-5: #ff9d73;
+  --el-color-primary-light-7: #ffbea3;
+  --el-color-primary-light-8: #ffd0bb;
+  --el-color-primary-light-9: #3a2218;
+  --el-color-primary-dark-2: #cc4818;
+  --el-bg-color: #161616;
+  --el-bg-color-page: #111111;
+  --el-bg-color-overlay: #1c1c1c;
+  --el-fill-color-blank: #161616;
+  color-scheme: dark;
+}
 
 :root {
   color-scheme: dark;
   --bg: #111;
   --text: #f3f3f3;
-  --muted: #9a9a9a;
-  --line: #2a2a2a;
+  --muted: var(--el-text-color-secondary);
+  --line: var(--el-border-color);
   --accent: #ff5a1f;
   --link: #6cb6ff;
 }
@@ -37,12 +53,6 @@ body {
     sans-serif;
   font-size: 16px;
   line-height: 1.5;
-}
-
-button,
-input,
-select {
-  padding: 0.5rem;
 }
 
 a {
@@ -214,10 +224,25 @@ p {
 }
 
 .new-approval,
-.inbox-list button,
+.inbox-list .el-button,
 .row-button {
   width: 100%;
+  height: auto;
+  justify-content: flex-start;
+  white-space: normal;
   text-align: left;
+}
+
+.inbox-list .el-button > span,
+.row-button > span {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem 0.75rem;
+  width: 100%;
+}
+
+.inbox-list .el-button > span {
+  flex-direction: column;
 }
 
 .new-approval {
@@ -225,15 +250,8 @@ p {
   margin-bottom: 1rem;
 }
 
-.view-nav button[aria-pressed='true'] {
-  font-weight: 700;
-}
-
-.inbox-list button[aria-pressed='true'] {
-  background: #2a2a2a;
-  color: var(--text);
-  box-shadow: inset 3px 0 0 #d4d4d4;
-  font-weight: 650;
+.inbox-list .el-button[aria-pressed='true'] {
+  box-shadow: inset 3px 0 0 var(--el-color-primary);
 }
 
 .inbox-title {
@@ -325,7 +343,17 @@ p {
   grid-column: 1 / -1;
 }
 
-label {
+.fields > label,
+.detail-row > label,
+.key-line > label,
+.pager > label,
+.clock-row > label,
+.attention > label,
+.pressing > label,
+.environment > label,
+.extra > label,
+.inline-field > label,
+.issued-key > label {
   display: block;
   margin-bottom: 0.85rem;
 }
@@ -339,12 +367,16 @@ label {
   margin-bottom: 0;
 }
 
-label input,
-label select,
-label textarea {
-  display: block;
+label > .el-input,
+label > .el-textarea,
+label > .el-select,
+label > .el-input-number {
   width: 100%;
   margin-top: 0.35rem;
+}
+
+.el-button + .el-button {
+  margin-left: 0;
 }
 
 .key-line {
@@ -675,17 +707,10 @@ label textarea {
   gap: 0.35rem;
 }
 
-.scopes label {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  width: auto;
-  margin-bottom: 0;
-}
-
-.scopes input {
-  width: auto;
-  margin-top: 0;
+.scopes .el-checkbox {
+  height: auto;
+  margin-right: 0;
+  white-space: normal;
 }
 
 .result-list {
@@ -805,13 +830,14 @@ pre {
   gap: 0.5rem;
 }
 
-.tabs button[aria-selected='true'] {
-  font-weight: 700;
+.chrome .el-alert {
+  border-radius: 0;
 }
 
 fieldset {
   margin: 0 0 1rem;
   padding: 0.75rem 1rem;
+  border: 1px solid var(--line);
 }
 
 @media (max-width: 70rem) {

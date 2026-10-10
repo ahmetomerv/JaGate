@@ -120,7 +120,6 @@ const sidebarSelection = ref('');
 const clientId = ref('');
 const auth = ref<'valid' | 'scoped' | 'missing' | 'invalid'>('valid');
 const scopedKey = ref('');
-const showScopedKey = ref(false);
 const keyId = ref('');
 const keyLabel = ref('Local worker');
 const keyExpiresAt = ref('');
@@ -138,9 +137,9 @@ const auditCursorStack = ref<string[]>([]);
 const requestId = ref('');
 const history = ref<RequestView[]>([]);
 const listPage = ref<ListPage | null>(null);
-const listStatus = ref('');
-const listDeliveryStatus = ref('');
-const listExecutionStatus = ref('');
+const listStatus = ref('any');
+const listDeliveryStatus = ref('any');
+const listExecutionStatus = ref('any');
 const listClaimedBefore = ref('');
 const listExpiresBefore = ref('');
 const attentionMinutes = ref(10);
@@ -166,7 +165,6 @@ const metadataText = ref(JSON.stringify(defaultRequest.metadata, null, 2));
 const actor = ref<'allowed' | 'outsider'>('allowed');
 const advanceSeconds = ref(61);
 const claimToken = ref('');
-const showClaimToken = ref(false);
 const resultSummary = ref('Completed in the calling application');
 const composing = ref(true);
 const storyLoading = ref(false);
@@ -215,9 +213,9 @@ const phase = computed(() => {
   return 'record';
 });
 const listFilters = computed(() => ({
-  ...(listStatus.value ? { status: listStatus.value } : {}),
-  ...(listDeliveryStatus.value ? { deliveryStatus: listDeliveryStatus.value } : {}),
-  ...(listExecutionStatus.value ? { executionStatus: listExecutionStatus.value } : {}),
+  ...(listStatus.value !== 'any' ? { status: listStatus.value } : {}),
+  ...(listDeliveryStatus.value !== 'any' ? { deliveryStatus: listDeliveryStatus.value } : {}),
+  ...(listExecutionStatus.value !== 'any' ? { executionStatus: listExecutionStatus.value } : {}),
   ...(listClaimedBefore.value ? { claimedBefore: listClaimedBefore.value } : {}),
   ...(listExpiresBefore.value ? { expiresBefore: listExpiresBefore.value } : {}),
   limit: Number(listLimit.value),
@@ -350,9 +348,9 @@ function applyAttention(kind: 'all' | 'delivery' | 'claimed' | 'expiry') {
   error.value = '';
   const now = Date.now() + (mode.value === 'simulated' ? simulatedClockOffset.value : 0);
   listStatus.value
-    = kind === 'delivery' || kind === 'expiry' ? 'pending' : kind === 'claimed' ? 'approved' : '';
-  listDeliveryStatus.value = kind === 'delivery' ? 'failed' : '';
-  listExecutionStatus.value = kind === 'claimed' ? 'claimed' : '';
+    = kind === 'delivery' || kind === 'expiry' ? 'pending' : kind === 'claimed' ? 'approved' : 'any';
+  listDeliveryStatus.value = kind === 'delivery' ? 'failed' : 'any';
+  listExecutionStatus.value = kind === 'claimed' ? 'claimed' : 'any';
   listClaimedBefore.value
     = kind === 'claimed' ? new Date(now - minutes * 60_000).toISOString() : '';
   listExpiresBefore.value = kind === 'expiry' ? new Date(now + minutes * 60_000).toISOString() : '';
@@ -942,14 +940,6 @@ async function armDeliveryFailure() {
     busy.value = false;
   }
 }
-function onScopeChange(scope: ClientKeyScope, event: Event) {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement))
-    return;
-  keyScopes.value = target.checked
-    ? [...new Set([...keyScopes.value, scope])]
-    : keyScopes.value.filter(item => item !== scope);
-}
 function statusClass(status: string) {
   if (
     status === 'approved'
@@ -1026,11 +1016,13 @@ onUnmounted(() => {
           JaGate <span>Playground</span>
         </div>
         <div class="top-links">
-          <a
+          <el-link
             href="https://github.com/ahmetomerv/JaGate/blob/main/docs/guide/playground.md"
             target="_blank"
             rel="noreferrer"
-          >Usage guide</a>
+          >
+            Usage guide
+          </el-link>
         </div>
       </div>
       <div class="environment">
@@ -1039,96 +1031,95 @@ onUnmounted(() => {
             <span class="mode-note">{{
               mode === 'simulated' ? 'Local simulator · isolated database' : bootstrap?.gatewayUrl
             }}</span></span>
-          <select v-model="modeSelection" aria-label="Environment">
-            <option value="simulated">Simulated Telegram</option>
-            <option value="live">Real gateway</option>
-          </select>
+          <el-select v-model="modeSelection" aria-label="Environment">
+            <el-option label="Simulated Telegram" value="simulated" />
+            <el-option label="Real gateway" value="live" />
+          </el-select>
         </label>
         <label>
           Client
-          <select v-model="clientId" :disabled="!clients.length" aria-label="Client">
-            <option v-for="option in clientOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
+          <el-select v-model="clientId" :disabled="!clients.length" aria-label="Client">
+            <el-option
+              v-for="option in clientOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
         </label>
         <label>
           Calling as
-          <select v-model="auth" aria-label="Calling as">
-            <option value="valid">Bootstrap key</option>
-            <option value="scoped">Issued key</option>
-            <option value="missing">Missing key</option>
-            <option value="invalid">Invalid key</option>
-          </select>
+          <el-select v-model="auth" aria-label="Calling as">
+            <el-option label="Bootstrap key" value="valid" />
+            <el-option label="Issued key" value="scoped" />
+            <el-option label="Missing key" value="missing" />
+            <el-option label="Invalid key" value="invalid" />
+          </el-select>
         </label>
       </div>
       <div v-if="auth === 'scoped'" class="issued-key">
-        <div class="inline-field">
-          <label for="issued-key">Issued key</label>
-          <input
+        <label for="issued-key">Issued key
+          <el-input
             id="issued-key"
             v-model="scopedKey"
-            :type="showScopedKey ? 'text' : 'password'"
+            type="password"
+            show-password
             autocomplete="off"
             spellcheck="false"
             placeholder="Paste the key returned once"
-          >
-          <button
-            type="button"
-            :aria-label="showScopedKey ? 'Hide issued key' : 'Show issued key'"
-            @click="showScopedKey = !showScopedKey"
-          >
-            {{ showScopedKey ? 'Hide' : 'Show' }}
-          </button>
-        </div>
+          />
+        </label>
       </div>
       <nav class="view-nav" aria-label="Playground sections">
-        <button type="button" :aria-pressed="view === 'approval'" @click="view = 'approval'">
+        <el-button :type="view === 'approval' ? 'primary' : 'default'" link @click="view = 'approval'">
           This approval
-        </button>
-        <button type="button" :aria-pressed="view === 'list'" @click="view = 'list'">
+        </el-button>
+        <el-button :type="view === 'list' ? 'primary' : 'default'" link @click="view = 'list'">
           All requests
-        </button>
-        <button type="button" :aria-pressed="view === 'keys'" @click="view = 'keys'">
+        </el-button>
+        <el-button :type="view === 'keys' ? 'primary' : 'default'" link @click="view = 'keys'">
           Keys
-        </button>
-        <button type="button" :aria-pressed="view === 'gateway'" @click="view = 'gateway'">
+        </el-button>
+        <el-button :type="view === 'gateway' ? 'primary' : 'default'" link @click="view = 'gateway'">
           Gateway
-        </button>
+        </el-button>
       </nav>
-      <p v-if="error" class="notice" role="alert">
-        {{ error }}
-      </p>
-      <p v-if="mode === 'live' && !clients.length" class="notice warn">
-        Live mode needs CLIENT_KEYS in your local .env and a running gateway.
-      </p>
+      <el-alert v-if="error" class="notice" type="error" :closable="false" :title="error" />
+      <el-alert
+        v-if="mode === 'live' && !clients.length"
+        class="notice"
+        type="warning"
+        :closable="false"
+        title="Live mode needs CLIENT_KEYS in your local .env and a running gateway."
+      />
     </header>
 
     <div class="workbench" :class="{ 'with-inbox': view === 'approval' }">
       <aside v-if="view === 'approval'" class="inbox">
         <div class="inbox-head">
           <span>This client</span>
-          <button type="button" :disabled="busy" @click="refreshHistory">
+          <el-button link :disabled="busy" @click="refreshHistory">
             Refresh
-          </button>
+          </el-button>
         </div>
-        <button type="button" class="new-approval" @click="newApproval">
+        <el-button class="new-approval" @click="newApproval">
           New approval
-        </button>
+        </el-button>
         <p v-if="!history.length" class="hint">
           Approvals for this client will show up here.
         </p>
         <div class="inbox-list">
-          <button
+          <el-button
             v-for="item in history"
             :key="item.id"
-            type="button"
+            :type="sidebarSelection === item.id ? 'primary' : 'default'"
+            plain
             :aria-pressed="sidebarSelection === item.id"
             @click="selectFromInbox(item)"
           >
             <span class="inbox-title">{{ item.title }}</span>
             <span class="inbox-meta"><span class="dot" :class="statusClass(item.status)" /><span class="inbox-id">{{ item.id.slice(0, 8) }}</span><span class="status-word">{{ item.status }}</span></span>
-          </button>
+          </el-button>
         </div>
       </aside>
 
@@ -1151,42 +1142,42 @@ onUnmounted(() => {
               that person sees in Telegram.
             </p>
             <div class="fields">
-              <label class="span-2">Title<input v-model="title" maxlength="100"></label>
-              <label class="span-2">Description<textarea v-model="description" rows="3" maxlength="1000" />
+              <label class="span-2">Title<el-input v-model="title" maxlength="100" /></label>
+              <label class="span-2">Description
+                <el-input v-model="description" type="textarea" :rows="3" maxlength="1000" />
               </label>
-              <label>Action<input v-model="action" maxlength="64" spellcheck="false"></label>
-              <label>Open for (seconds)<input
-                v-model.number="expiresInSeconds"
-                type="number"
-                min="60"
-                max="86400"
-              ></label>
+              <label>Action<el-input v-model="action" maxlength="64" spellcheck="false" /></label>
+              <label>Open for (seconds)
+                <el-input-number v-model="expiresInSeconds" :min="60" :max="86400" :step="1" />
+              </label>
             </div>
             <div class="detail-block">
               <div class="section-row">
                 <h2>Details the approver sees</h2>
-                <button type="button" :disabled="detailRows.length >= 10" @click="addDetail">
+                <el-button :disabled="detailRows.length >= 10" @click="addDetail">
                   Add detail
-                </button>
+                </el-button>
               </div>
               <div v-for="(row, index) in detailRows" :key="index" class="detail-row">
-                <label>Label<input v-model="row.label" maxlength="40"></label>
-                <label>Value<input v-model="row.value" maxlength="160"></label>
-                <button type="button" @click="removeDetail(index)">
+                <label>Label<el-input v-model="row.label" maxlength="40" /></label>
+                <label>Value<el-input v-model="row.value" maxlength="160" /></label>
+                <el-button link type="danger" @click="removeDetail(index)">
                   Remove
-                </button>
+                </el-button>
               </div>
             </div>
             <div class="key-line">
-              <label for="idempotency-key">Idempotency key<input
-                id="idempotency-key"
-                v-model="idempotencyKey"
-                maxlength="128"
-                spellcheck="false"
-              ></label>
-              <button type="button" @click="idempotencyKey = `playground:${Date.now()}`">
+              <label for="idempotency-key">Idempotency key
+                <el-input
+                  id="idempotency-key"
+                  v-model="idempotencyKey"
+                  maxlength="128"
+                  spellcheck="false"
+                />
+              </label>
+              <el-button @click="idempotencyKey = `playground:${Date.now()}`">
                 New key
-              </button>
+              </el-button>
               <p class="hint">
                 Ask again with the same key and the same text to get the original request. Change
                 the text and that key is rejected.
@@ -1194,35 +1185,33 @@ onUnmounted(() => {
             </div>
             <details class="extra">
               <summary>Metadata, stored with the request and omitted from Telegram</summary>
-              <label>Metadata JSON<textarea
-                v-model="metadataText"
-                rows="3"
-                spellcheck="false"
-              />
+              <label>Metadata JSON
+                <el-input v-model="metadataText" type="textarea" :rows="3" spellcheck="false" />
               </label>
               <pre><code>{{ JSON.stringify(requestPreview, null, 2) }}</code></pre>
             </details>
             <div v-if="mode === 'simulated'" class="try-row">
-              <button
-                type="button"
+              <el-button
+                :type="failNextDelivery ? 'warning' : 'default'"
                 :disabled="busy || failNextDelivery"
                 @click="armDeliveryFailure"
               >
                 {{ failNextDelivery ? 'Next message will fail' : 'Make the next message fail' }}
-              </button>
+              </el-button>
               <p class="hint">
                 The request is still saved. Telegram delivery is marked failed, so nobody can
                 approve it until a message is delivered.
               </p>
             </div>
-            <button
-              type="button"
+            <el-button
+              type="primary"
               :aria-busy="busy"
-              :disabled="busy || !clientId || (auth === 'scoped' && !scopedKey)"
+              :loading="busy"
+              :disabled="!clientId || (auth === 'scoped' && !scopedKey)"
               @click="ask"
             >
-              {{ busy ? 'Asking…' : 'Ask for approval' }}
-            </button>
+              Ask for approval
+            </el-button>
           </section>
 
           <section v-else-if="!selected && (storyLoading || !unavailable)" class="card">
@@ -1243,9 +1232,9 @@ onUnmounted(() => {
               Each client only reads the approvals it created. Switch back to the owning client, or
               start another approval.
             </p>
-            <button type="button" @click="newApproval">
+            <el-button type="primary" @click="newApproval">
               New approval
-            </button>
+            </el-button>
           </section>
 
           <template v-else>
@@ -1258,9 +1247,9 @@ onUnmounted(() => {
                 {{ createNotice }}
               </p>
               <div class="facts">
-                <span><small>Decision</small>{{ selected.status }}</span>
-                <span><small>Delivery</small>{{ selected.deliveryStatus }}</span>
-                <span><small>Application</small>{{ selected.executionStatus }}</span>
+                <span><small>Decision</small><el-tag effect="plain">{{ selected.status }}</el-tag></span>
+                <span><small>Delivery</small><el-tag effect="plain">{{ selected.deliveryStatus }}</el-tag></span>
+                <span><small>Application</small><el-tag effect="plain">{{ selected.executionStatus }}</el-tag></span>
               </div>
             </section>
 
@@ -1282,14 +1271,14 @@ onUnmounted(() => {
                     Action <code>{{ selected.action }}</code> · open until
                     {{ new Date(selected.expiresAt).toLocaleString() }}
                   </p>
-                  <button
+                  <el-button
                     v-if="selected.status === 'pending'"
-                    type="button"
+                    type="danger"
                     :disabled="busy"
                     @click="cancelRequest"
                   >
                     Cancel this request
-                  </button>
+                  </el-button>
                 </div>
               </section>
 
@@ -1331,20 +1320,20 @@ onUnmounted(() => {
                           v-if="mode === 'simulated' && selected.deliveryStatus === 'delivered'"
                           class="keyboard"
                         >
-                          <button
-                            type="button"
+                          <el-button
+                            type="success"
                             :disabled="busy || !requestId"
                             @click="decide('approve')"
                           >
                             Approve
-                          </button>
-                          <button
-                            type="button"
+                          </el-button>
+                          <el-button
+                            type="danger"
                             :disabled="busy || !requestId"
                             @click="decide('reject')"
                           >
                             Reject
-                          </button>
+                          </el-button>
                         </div>
                       </div>
                       <div v-if="telegramReply" class="message">
@@ -1356,19 +1345,19 @@ onUnmounted(() => {
                     </div>
                     <div v-if="mode === 'simulated'" class="pressing">
                       <label>Pressing as
-                        <select v-model="actor" aria-label="Who presses the button">
-                          <option value="allowed">Allowlisted approver</option>
-                          <option value="outsider">Someone else</option>
-                        </select>
+                        <el-select v-model="actor" aria-label="Who presses the button">
+                          <el-option label="Allowlisted approver" value="allowed" />
+                          <el-option label="Someone else" value="outsider" />
+                        </el-select>
                       </label>
                     </div>
                     <div v-else class="pressing">
                       <p class="hint">
                         Approve or reject in this client’s Telegram chat, then refresh.
                       </p>
-                      <button type="button" :disabled="busy" @click="openCurrent">
+                      <el-button :disabled="busy" @click="openCurrent">
                         Refresh
-                      </button>
+                      </el-button>
                     </div>
                   </div>
                   <div v-if="mode === 'simulated'" class="clock">
@@ -1377,16 +1366,18 @@ onUnmounted(() => {
                       clock passes its deadline. An approval already recorded stays approved.
                     </p>
                     <div class="clock-row">
-                      <label>Seconds<input
-                        v-model.number="advanceSeconds"
-                        type="number"
-                        min="1"
-                        max="86400"
-                        aria-label="Seconds to move the clock"
-                      ></label>
-                      <button type="button" :disabled="busy" @click="advanceTime">
+                      <label>Seconds
+                        <el-input-number
+                          v-model="advanceSeconds"
+                          :min="1"
+                          :max="86400"
+                          :step="1"
+                          aria-label="Seconds to move the clock"
+                        />
+                      </label>
+                      <el-button :disabled="busy" @click="advanceTime">
                         Move the clock forward
-                      </button>
+                      </el-button>
                     </div>
                   </div>
                 </div>
@@ -1409,9 +1400,9 @@ onUnmounted(() => {
                       Claim this approval once. The application then performs the action itself and
                       reports what happened.
                     </p>
-                    <button type="button" :disabled="busy" @click="claimApproval">
+                    <el-button type="primary" :disabled="busy" @click="claimApproval">
                       Claim this approval
-                    </button>
+                    </el-button>
                   </template>
                   <template v-else>
                     <p v-if="selected.resultAt">
@@ -1425,41 +1416,36 @@ onUnmounted(() => {
                       failed.
                     </p>
                     <div class="inline-field">
-                      <label for="claim-token">Claim token</label>
-                      <input
-                        id="claim-token"
-                        v-model="claimToken"
-                        :type="showClaimToken ? 'text' : 'password'"
-                        autocomplete="off"
-                        placeholder="Filled after a successful claim"
-                      >
-                      <button
-                        type="button"
-                        :aria-label="showClaimToken ? 'Hide claim token' : 'Show claim token'"
-                        @click="showClaimToken = !showClaimToken"
-                      >
-                        {{ showClaimToken ? 'Hide' : 'Show' }}
-                      </button>
+                      <label for="claim-token">Claim token
+                        <el-input
+                          id="claim-token"
+                          v-model="claimToken"
+                          type="password"
+                          show-password
+                          autocomplete="off"
+                          placeholder="Filled after a successful claim"
+                        />
+                      </label>
                     </div>
-                    <label>Summary<input v-model="resultSummary" maxlength="300"></label>
+                    <label>Summary<el-input v-model="resultSummary" maxlength="300" /></label>
                     <div class="chat-actions">
-                      <button
-                        type="button"
+                      <el-button
+                        type="success"
                         :disabled="busy || !claimToken"
                         @click="report('succeeded')"
                       >
                         Report succeeded
-                      </button>
-                      <button
-                        type="button"
+                      </el-button>
+                      <el-button
+                        type="danger"
                         :disabled="busy || !claimToken"
                         @click="report('failed')"
                       >
                         Report failed
-                      </button>
-                      <button type="button" :disabled="busy" @click="claimApproval">
+                      </el-button>
+                      <el-button :disabled="busy" @click="claimApproval">
                         Claim again
-                      </button>
+                      </el-button>
                     </div>
                     <p class="hint">
                       The token is returned once. Change it to see a rejected report. Claiming again
@@ -1481,43 +1467,42 @@ onUnmounted(() => {
                   <p v-else-if="!eventPage.items.length" class="hint">
                     No events on this page.
                   </p>
-                  <ol v-else class="timeline">
-                    <li v-for="event in eventPage.items" :key="event.sequence">
-                      <span class="dot" :class="statusClass(event.type)" />
-                      <div>
-                        <strong>{{ eventLabel(event.type) }}</strong>
-                        <small>#{{ event.sequence }} ·
-                          <time :datetime="event.occurredAt">{{
-                            new Date(event.occurredAt).toLocaleString()
-                          }}</time><template v-if="event.actorId"> · Approver {{ event.actorId }}</template><template v-if="event.attempt">
-                            · Attempt {{ event.attempt }}</template></small>
+                  <el-timeline v-else>
+                    <el-timeline-item
+                      v-for="event in eventPage.items"
+                      :key="event.sequence"
+                      :timestamp="new Date(event.occurredAt).toLocaleString()"
+                    >
+                      <strong>{{ eventLabel(event.type) }}</strong>
+                      <div class="muted">
+                        #{{ event.sequence }}
+                        <template v-if="event.actorId">
+                          · Approver {{ event.actorId }}
+                        </template>
+                        <template v-if="event.attempt">
+                          · Attempt {{ event.attempt }}
+                        </template>
                       </div>
-                    </li>
-                  </ol>
+                    </el-timeline-item>
+                  </el-timeline>
                   <div class="pager">
-                    <label>Events per page<input
-                      v-model.number="eventLimit"
-                      type="number"
-                      min="1"
-                      max="100"
-                      @change="reloadEvents"
-                    ></label>
+                    <label>Events per page
+                      <el-input-number
+                        v-model="eventLimit"
+                        :min="1"
+                        :max="100"
+                        :step="1"
+                        @change="reloadEvents"
+                      />
+                    </label>
                     <span>Page {{ eventCursorStack.length + 1 }}</span>
                     <div class="chat-actions">
-                      <button
-                        type="button"
-                        :disabled="busy || !eventCursorStack.length"
-                        @click="previousEventPage"
-                      >
+                      <el-button :disabled="busy || !eventCursorStack.length" @click="previousEventPage">
                         Previous
-                      </button>
-                      <button
-                        type="button"
-                        :disabled="busy || !eventPage?.nextCursor"
-                        @click="nextEventPage"
-                      >
+                      </el-button>
+                      <el-button :disabled="busy || !eventPage?.nextCursor" @click="nextEventPage">
                         Next
-                      </button>
+                      </el-button>
                     </div>
                   </div>
                 </div>
@@ -1532,25 +1517,27 @@ onUnmounted(() => {
             Every row belongs to the selected client. Open one to continue its approval.
           </p>
           <div class="attention" role="group" aria-label="Requests needing attention">
-            <button type="button" :disabled="busy" @click="applyAttention('delivery')">
+            <el-button :disabled="busy" @click="applyAttention('delivery')">
               Failed delivery
-            </button>
-            <button type="button" :disabled="busy" @click="applyAttention('claimed')">
+            </el-button>
+            <el-button :disabled="busy" @click="applyAttention('claimed')">
               Old claims
-            </button>
-            <button type="button" :disabled="busy" @click="applyAttention('expiry')">
+            </el-button>
+            <el-button :disabled="busy" @click="applyAttention('expiry')">
               Expiring soon
-            </button>
-            <button type="button" :disabled="busy" @click="applyAttention('all')">
+            </el-button>
+            <el-button :disabled="busy" @click="applyAttention('all')">
               Clear filters
-            </button>
-            <label>Window (minutes)<input
-              v-model.number="attentionMinutes"
-              type="number"
-              min="1"
-              max="1440"
-              aria-label="Attention window in minutes"
-            ></label>
+            </el-button>
+            <label>Window (minutes)
+              <el-input-number
+                v-model="attentionMinutes"
+                :min="1"
+                :max="1440"
+                :step="1"
+                aria-label="Attention window in minutes"
+              />
+            </label>
           </div>
           <p class="hint">
             Failed delivery lists pending requests whose Telegram message failed. Old claims are
@@ -1560,74 +1547,65 @@ onUnmounted(() => {
           </p>
           <div class="fields">
             <label>Decision
-              <select v-model="listStatus" aria-label="Decision">
-                <option value="">Any</option>
-                <option value="pending">Pending</option>
-                <option value="approved">Approved</option>
-                <option value="rejected">Rejected</option>
-                <option value="expired">Expired</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
+              <el-select v-model="listStatus" aria-label="Decision">
+                <el-option label="Any" value="any" />
+                <el-option label="Pending" value="pending" />
+                <el-option label="Approved" value="approved" />
+                <el-option label="Rejected" value="rejected" />
+                <el-option label="Expired" value="expired" />
+                <el-option label="Cancelled" value="cancelled" />
+              </el-select>
             </label>
             <label>Delivery
-              <select v-model="listDeliveryStatus" aria-label="Delivery">
-                <option value="">Any</option>
-                <option value="pending">Pending</option>
-                <option value="retrying">Retrying</option>
-                <option value="delivered">Delivered</option>
-                <option value="failed">Failed</option>
-              </select>
+              <el-select v-model="listDeliveryStatus" aria-label="Delivery">
+                <el-option label="Any" value="any" />
+                <el-option label="Pending" value="pending" />
+                <el-option label="Retrying" value="retrying" />
+                <el-option label="Delivered" value="delivered" />
+                <el-option label="Failed" value="failed" />
+              </el-select>
             </label>
             <label>Application
-              <select v-model="listExecutionStatus" aria-label="Application">
-                <option value="">Any</option>
-                <option value="unclaimed">Unclaimed</option>
-                <option value="claimed">Claimed</option>
-                <option value="succeeded">Succeeded</option>
-                <option value="failed">Failed</option>
-              </select>
+              <el-select v-model="listExecutionStatus" aria-label="Application">
+                <el-option label="Any" value="any" />
+                <el-option label="Unclaimed" value="unclaimed" />
+                <el-option label="Claimed" value="claimed" />
+                <el-option label="Succeeded" value="succeeded" />
+                <el-option label="Failed" value="failed" />
+              </el-select>
             </label>
-            <label>Page size<input v-model.number="listLimit" type="number" min="1" max="100"></label>
-            <label>Claimed before <span class="muted">UTC</span><input
-              v-model.trim="listClaimedBefore"
-              placeholder="UTC timestamp"
-              spellcheck="false"
-            ></label>
-            <label>Expires before <span class="muted">UTC</span><input
-              v-model.trim="listExpiresBefore"
-              placeholder="UTC timestamp"
-              spellcheck="false"
-            ></label>
+            <label>Page size<el-input-number v-model="listLimit" :min="1" :max="100" :step="1" /></label>
+            <label>Claimed before <span class="muted">UTC</span>
+              <el-input v-model.trim="listClaimedBefore" placeholder="UTC timestamp" spellcheck="false" />
+            </label>
+            <label>Expires before <span class="muted">UTC</span>
+              <el-input v-model.trim="listExpiresBefore" placeholder="UTC timestamp" spellcheck="false" />
+            </label>
           </div>
-          <button type="button" :disabled="busy || !clientId" @click="showRequests">
+          <el-button type="primary" :disabled="busy || !clientId" @click="showRequests">
             Show these requests
-          </button>
+          </el-button>
           <div v-if="listPage" class="result-list">
             <p v-if="!listPage.items.length" class="hint">
               No requests match these filters.
             </p>
-            <button
+            <el-button
               v-for="item in listPage.items"
               :key="item.id"
-              type="button"
               class="row-button"
               @click="openRequest(item)"
             >
               <span class="row-copy"><strong>{{ item.title }}</strong><small>{{ item.status }} · {{ item.deliveryStatus }} · {{ item.executionStatus }}</small><small>{{ new Date(item.createdAt).toLocaleString() }}</small></span>
-            </button>
+            </el-button>
             <div class="pager">
               <span>Page {{ listCursorStack.length + 1 }}</span>
               <div class="chat-actions">
-                <button
-                  type="button"
-                  :disabled="busy || !listCursorStack.length"
-                  @click="previousPage"
-                >
+                <el-button :disabled="busy || !listCursorStack.length" @click="previousPage">
                   Previous
-                </button>
-                <button type="button" :disabled="busy || !listPage.nextCursor" @click="nextPage">
+                </el-button>
+                <el-button :disabled="busy || !listPage.nextCursor" @click="nextPage">
                   Next
-                </button>
+                </el-button>
               </div>
             </div>
           </div>
@@ -1640,77 +1618,76 @@ onUnmounted(() => {
             operations you allow, and it cannot issue keys or read the audit log.
           </p>
           <div class="fields">
-            <label class="span-2">Name<input v-model="keyLabel" maxlength="80" placeholder="Name the app or worker"></label>
-            <label class="span-2">Expires at <span class="muted">optional UTC</span><input
-              v-model.trim="keyExpiresAt"
-              placeholder="Leave empty for no expiry"
-              spellcheck="false"
-            ></label>
+            <label class="span-2">Name
+              <el-input v-model="keyLabel" maxlength="80" placeholder="Name the app or worker" />
+            </label>
+            <label class="span-2">Expires at <span class="muted">optional UTC</span>
+              <el-input
+                v-model.trim="keyExpiresAt"
+                placeholder="Leave empty for no expiry"
+                spellcheck="false"
+              />
+            </label>
           </div>
           <div class="chat-actions">
-            <button type="button" @click="setKeyExpiryOneHour">
+            <el-button @click="setKeyExpiryOneHour">
               Expire in 1 hour
-            </button>
-            <button type="button" @click="keyExpiresAt = ''">
+            </el-button>
+            <el-button @click="keyExpiresAt = ''">
               No expiry
-            </button>
+            </el-button>
           </div>
           <fieldset>
             <legend>This key may</legend>
-            <div class="scopes">
-              <label v-for="scope in availableKeyScopes" :key="scope"><input
-                type="checkbox"
-                :checked="keyScopes.includes(scope)"
-                @change="onScopeChange(scope, $event)"
-              >{{ scopeLabels[scope] }} <span class="muted">{{ scope }}</span></label>
-            </div>
+            <el-checkbox-group v-model="keyScopes" class="scopes">
+              <el-checkbox v-for="scope in availableKeyScopes" :key="scope" :value="scope">
+                {{ scopeLabels[scope] }} <span class="muted">{{ scope }}</span>
+              </el-checkbox>
+            </el-checkbox-group>
           </fieldset>
-          <button type="button" :disabled="busy || !clientId || auth !== 'valid'" @click="issueKey">
+          <el-button type="primary" :disabled="busy || !clientId || auth !== 'valid'" @click="issueKey">
             Issue key
-          </button>
+          </el-button>
           <div v-if="scopedKey" class="callout">
             <p>
               A key is held for this browser session. It is shown once. Copy it, then call as that
               key.
             </p>
             <div class="inline-field">
-              <label for="session-key">Issued key</label>
-              <input
-                id="session-key"
-                v-model="scopedKey"
-                :type="showScopedKey ? 'text' : 'password'"
-                autocomplete="off"
-                spellcheck="false"
-              >
-              <button
-                type="button"
-                :aria-label="showScopedKey ? 'Hide issued key' : 'Show issued key'"
-                @click="showScopedKey = !showScopedKey"
-              >
-                {{ showScopedKey ? 'Hide' : 'Show' }}
-              </button>
+              <label for="session-key">Issued key
+                <el-input
+                  id="session-key"
+                  v-model="scopedKey"
+                  type="password"
+                  show-password
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              </label>
             </div>
-            <button type="button" @click="useIssuedKey">
+            <el-button @click="useIssuedKey">
               Call as this key
-            </button>
+            </el-button>
           </div>
           <div class="section-row">
             <h2>Issued keys</h2>
-            <button type="button" :disabled="busy || !clientId" @click="showKeys">
+            <el-button :disabled="busy || !clientId" @click="showKeys">
               Show keys
-            </button>
+            </el-button>
           </div>
           <p class="hint">
             Secret values are never listed. Revocation takes effect on the next call. The bootstrap
             key is rotated in .env.
           </p>
-          <label>Page size<input
-            v-model.number="keyLimit"
-            type="number"
-            min="1"
-            max="100"
-            aria-label="Key page size"
-          ></label>
+          <label>Page size
+            <el-input-number
+              v-model="keyLimit"
+              :min="1"
+              :max="100"
+              :step="1"
+              aria-label="Key page size"
+            />
+          </label>
           <div v-if="keyPage" class="result-list">
             <p v-if="!keyPage.items.length" class="hint">
               No issued keys on this page.
@@ -1722,62 +1699,53 @@ onUnmounted(() => {
                   : 'No expiry'
               }}</small></span>
               <span class="muted">{{ keyState(item) }}</span>
-              <button
-                type="button"
+              <el-button
+                type="danger"
+                link
                 :disabled="busy || !!item.revokedAt"
                 @click="revokeKey(item.id)"
               >
                 Revoke
-              </button>
+              </el-button>
             </div>
             <div class="pager">
               <span>Page {{ keyCursorStack.length + 1 }}</span>
               <div class="chat-actions">
-                <button
-                  type="button"
-                  :disabled="busy || !keyCursorStack.length"
-                  @click="previousKeyPage"
-                >
+                <el-button :disabled="busy || !keyCursorStack.length" @click="previousKeyPage">
                   Previous
-                </button>
-                <button type="button" :disabled="busy || !keyPage.nextCursor" @click="nextKeyPage">
+                </el-button>
+                <el-button :disabled="busy || !keyPage.nextCursor" @click="nextKeyPage">
                   Next
-                </button>
+                </el-button>
               </div>
             </div>
           </div>
           <div class="section-row">
             <h2>Audit</h2>
-            <button
-              type="button"
-              :disabled="busy || !clientId || auth !== 'valid'"
-              @click="showAudit"
-            >
+            <el-button :disabled="busy || !clientId || auth !== 'valid'" @click="showAudit">
               Show audit
-            </button>
+            </el-button>
           </div>
           <p class="hint">
             Newest first. Rows name key ids, never the secret or the claim token. An issued key
             cannot read this list.
           </p>
           <div class="fields">
-            <label>Page size<input
-              v-model.number="auditLimit"
-              type="number"
-              min="1"
-              max="100"
-              aria-label="Audit page size"
-            ></label>
-            <label>Request id<input
-              v-model.trim="auditRequestId"
-              placeholder="Filter by request"
-              spellcheck="false"
-            ></label>
-            <label class="span-2">Key id<input
-              v-model.trim="auditKeyId"
-              placeholder="Actor or affected key"
-              spellcheck="false"
-            ></label>
+            <label>Page size
+              <el-input-number
+                v-model="auditLimit"
+                :min="1"
+                :max="100"
+                :step="1"
+                aria-label="Audit page size"
+              />
+            </label>
+            <label>Request id
+              <el-input v-model.trim="auditRequestId" placeholder="Filter by request" spellcheck="false" />
+            </label>
+            <label class="span-2">Key id
+              <el-input v-model.trim="auditKeyId" placeholder="Actor or affected key" spellcheck="false" />
+            </label>
           </div>
           <div v-if="auditPage" class="result-list">
             <p v-if="!auditPage.items.length" class="hint">
@@ -1798,20 +1766,12 @@ onUnmounted(() => {
             <div class="pager">
               <span>Page {{ auditCursorStack.length + 1 }}</span>
               <div class="chat-actions">
-                <button
-                  type="button"
-                  :disabled="busy || !auditCursorStack.length"
-                  @click="previousAuditPage"
-                >
+                <el-button :disabled="busy || !auditCursorStack.length" @click="previousAuditPage">
                   Previous
-                </button>
-                <button
-                  type="button"
-                  :disabled="busy || !auditPage.nextCursor"
-                  @click="nextAuditPage"
-                >
+                </el-button>
+                <el-button :disabled="busy || !auditPage.nextCursor" @click="nextAuditPage">
                   Next
-                </button>
+                </el-button>
               </div>
             </div>
           </div>
@@ -1823,12 +1783,12 @@ onUnmounted(() => {
             Health and readiness are public. They answer even when Calling as is missing or invalid.
           </p>
           <div class="gateway-actions">
-            <button type="button" :disabled="busy" @click="execute('health')">
+            <el-button type="primary" :disabled="busy" @click="execute('health')">
               Check health
-            </button>
-            <button type="button" :disabled="busy" @click="execute('ready')">
+            </el-button>
+            <el-button :disabled="busy" @click="execute('ready')">
               Check readiness
-            </button>
+            </el-button>
           </div>
           <p class="hint">
             Readiness needs working storage and, on a real gateway, a live Telegram connection. The
@@ -1848,31 +1808,17 @@ onUnmounted(() => {
             </span>
           </summary>
           <div class="editor-bar">
-            <div class="tabs" role="tablist" aria-label="Response view">
-              <button
-                type="button"
-                role="tab"
-                :aria-selected="responseTab === 'body'"
-                @click="responseTab = 'body'"
-              >
+            <el-radio-group v-model="responseTab" aria-label="Response view">
+              <el-radio-button value="body">
                 Body
-              </button>
-              <button
-                type="button"
-                role="tab"
-                :aria-selected="responseTab === 'history'"
-                @click="responseTab = 'history'"
-              >
+              </el-radio-button>
+              <el-radio-button value="history">
                 History ({{ entries.length }})
-              </button>
-            </div>
-            <button
-              v-if="visibleEntry && responseTab === 'body'"
-              type="button"
-              @click="copyResponse"
-            >
+              </el-radio-button>
+            </el-radio-group>
+            <el-button v-if="visibleEntry && responseTab === 'body'" @click="copyResponse">
               {{ copied ? 'Copied' : 'Copy JSON' }}
-            </button>
+            </el-button>
           </div>
           <div v-if="responseTab === 'body'">
             <template v-if="visibleEntry">
@@ -1883,11 +1829,12 @@ onUnmounted(() => {
             </template>
           </div>
           <div v-else class="result-list">
-            <button
+            <el-button
               v-for="(entry, index) in entries"
               :key="index"
-              type="button"
               class="row-button"
+              :type="activeEntry === index ? 'primary' : 'default'"
+              plain
               :aria-pressed="activeEntry === index"
               @click="
                 activeEntry = index;
@@ -1899,7 +1846,7 @@ onUnmounted(() => {
               }}</span>
               <strong class="row-copy">{{ entry.label }}</strong>
               <time class="muted">{{ entry.time }}</time>
-            </button>
+            </el-button>
           </div>
         </details>
       </main>

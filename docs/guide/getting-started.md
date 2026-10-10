@@ -83,4 +83,4 @@ When you are done, press Ctrl+C in terminal 1. The SQLite file remains in `data/
 
 JaGate applies numbered SQL migrations, including request listing, timelines, and issued keys, automatically when it opens the database. You do not need to run the migration files manually.
 
-Next: try the [HTTP API](/API) directly, use the [TypeScript client](/guide/typescript), or run with [Docker Compose](/guide/docker).
+Next: open the [operator console](/guide/console), try the [HTTP API](/API) directly, use the [TypeScript client](/guide/typescript), or run with [Docker Compose](/guide/docker).

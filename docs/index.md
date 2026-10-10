@@ -27,6 +27,8 @@ features:
     details: Filter and page through a client's requests, then inspect the recorded state changes for one request.
   - title: Limited client keys
     details: Issue keys for specific request operations and revoke them without restarting the gateway.
+  - title: Operator console
+    details: Review one client's requests, timelines, keys, and audit events in the browser. Decisions stay in Telegram.
 ---
 
 JaGate is a self-hosted approval service for actions such as deploying a site, publishing a post, or starting a maintenance job. Applications in any language use its [HTTP API](/API). Node.js and TypeScript applications can also use the [typed client](/guide/typescript).

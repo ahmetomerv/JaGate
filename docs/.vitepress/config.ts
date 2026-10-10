@@ -30,6 +30,7 @@ export default defineConfig({
           { text: 'Get started locally', link: '/guide/getting-started' },
           { text: 'Scenario guides', link: '/guide/scenarios' },
           { text: 'Local playground', link: '/guide/playground' },
+          { text: 'Operator console', link: '/guide/console' },
           { text: 'Docker Compose', link: '/guide/docker' },
           { text: 'Configuration and clients', link: '/guide/configuration' },
           { text: 'TypeScript client', link: '/guide/typescript' },

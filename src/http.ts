@@ -4,6 +4,7 @@ import type { ClientKeyScope } from './model.js';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import Fastify from 'fastify';
 import { z, ZodError } from 'zod';
+import { applySecurityHeaders, registerConsole } from './console-host.js';
 import { GatewayError } from './errors.js';
 import { clientKeyScopes, createSchema } from './model.js';
 
@@ -161,8 +162,15 @@ export function createHttpServer(
   core: GatewayCore,
   clientKeys: ReadonlyMap<string, string>,
   telegramReady: () => boolean,
+  options: { consoleRoot?: string } = {},
 ): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: 12_000 });
+  app.addHook('onRequest', async (request, reply) => {
+    applySecurityHeaders(reply);
+    const path = request.url.split('?')[0] ?? '/';
+    if (!path.startsWith('/assets/'))
+      reply.header('cache-control', 'no-store');
+  });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof GatewayError) {
       return reply
@@ -329,5 +337,7 @@ export function createHttpServer(
     },
     { prefix: '/v1' },
   );
+  if (options.consoleRoot)
+    registerConsole(app, options.consoleRoot);
   return app;
 }
