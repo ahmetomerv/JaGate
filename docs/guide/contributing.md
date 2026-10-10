@@ -9,7 +9,7 @@ npm ci
 npm run docs:dev       # local documentation server
 npm run docs:build     # static site and link check
 npm run docs:preview   # preview the built site
-npm run verify         # typecheck, tests, lint, app build, console build, docs build
+npm run verify         # typecheck, tests, lint, app build, console build, docs build, playground build
 ```
 
 The site uses base path `/JaGate/` because the repository is published as a GitHub Pages project site at `https://ahmetomerv.github.io/JaGate/`. The same base path appears in local dev and preview URLs. Generated `.vitepress/cache` and `.vitepress/dist` files are ignored by Git.

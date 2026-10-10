@@ -43,11 +43,13 @@ Client app → performs its own action → reports the result
 
 ## Developing
 
-Follow the [local setup guide](https://ahmetomerv.github.io/JaGate/guide/getting-started.html). Node.js 24.21.0 is required. From the repository root, `npm ci` then `npm run verify` runs typecheck, tests, lint, and the server, docs, and playground builds.
+Follow the [local setup guide](https://ahmetomerv.github.io/JaGate/guide/getting-started.html). Node.js 24.21.0 is required. From the repository root, `npm ci` then `npm run verify` runs typecheck, tests, lint, and the server, console, docs, and playground builds.
 
 `npm run demo:fake` walks through one approval with an in-memory database and a fake Telegram transport.
 
 `npm run playground` opens a local API client workbench for idempotency, cancellation, expiry, claims, client isolation, and real Telegram integration. See the [playground guide](docs/guide/playground.md).
+
+`npm run console:dev` opens the operator console at `http://127.0.0.1:5174` against a gateway on port 3080. See the [console guide](docs/guide/console.md).
 
 For a configured local gateway, run `npm run build` followed by `npm run start:local`; the latter loads `.env` without changing the production `npm start` command.
 

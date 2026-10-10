@@ -9,6 +9,7 @@ JaGate decides and coordinates approval. It **never executes** a caller-supplied
 - The Telegram message displays the client ID, title, description, details, action type, short request ID, and expiry. Caller metadata stays in SQLite and owner-scoped API responses; it is not displayed in Telegram. Avoid secrets in all request content and result summaries.
 - JaGate binds a callback to the stored request, destination chat ID, and Telegram message ID, and conditionally settles pending, unexpired requests. Duplicate or late button taps cannot change a settled decision.
 - The server binds to localhost by default. The Compose example publishes to host loopback. Use a private network or authenticated TLS reverse proxy if a remote client must reach it. Do not expose the bare HTTP port to the public internet.
+- Every response sends a content security policy that allows scripts only from this origin. Style attributes may be inline. Images may come from this origin or a data URL. Responses also send `nosniff`, `no-referrer`, and framing denial. They are `no-store`, except the console's hashed files under `/assets/`.
 
 ## Decision, claim, and crash recovery
 
@@ -34,4 +35,4 @@ The console is static files served by the gateway on the same origin as the API.
 
 Use an issued key with `requests:read` for daily viewing. Add `requests:cancel` only when that browser should cancel pending requests. Key issuance, revocation, and the audit feed require the bootstrap key. The console has no control that approves, rejects, claims, or reports a result. A claimed request with no reported result is shown as an unknown external outcome.
 
-Metadata is visible in the console and was not sent to Telegram. Treat the console like the API: loopback by default, and a private network or authenticated TLS reverse proxy if a remote operator must reach it. Responses send a content security policy that keeps scripts on this origin, plus `nosniff`, `no-referrer`, and framing denial. Request text is rendered as text.
+Metadata is visible in the console and was not sent to Telegram. Treat the console like the API: loopback by default, and a private network or authenticated TLS reverse proxy if a remote operator must reach it. Request text is rendered as text.

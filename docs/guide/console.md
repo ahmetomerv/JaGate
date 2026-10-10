@@ -22,7 +22,7 @@ npm run console:build
 npm run start:local
 ```
 
-Open `http://127.0.0.1:3080`. `npm start` serves the console when `dist/console/index.html` is present. The [Docker image](/guide/docker) builds that directory and serves it on the same port as the API.
+Open `http://127.0.0.1:3080`. `npm start` and `npm run start:local` serve that build when `dist/console/index.html` is present beside the compiled server. `npm run dev` runs from source and does not serve it. The [Docker image](/guide/docker) builds that directory and serves it on the same port as the API.
 
 The console is a Vue 3 app in `console/`, using Element Plus. It calls the existing HTTP API through a wrapper that exposes list, read, cancel, issued keys, and audit. It does not call create, claim, or result.
 
