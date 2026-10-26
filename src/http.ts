@@ -33,7 +33,7 @@ const listQuerySchema = z
       .regex(/^[1-9]\d{0,2}$/)
       .transform(Number)
       .pipe(z.number().max(100))
-      .default('20'),
+      .default(20),
     cursor: z
       .string()
       .max(256)
@@ -49,7 +49,7 @@ const eventsQuerySchema = z
       .regex(/^[1-9]\d{0,2}$/)
       .transform(Number)
       .pipe(z.number().max(100))
-      .default('50'),
+      .default(50),
     cursor: z
       .string()
       .regex(/^[1-9]\d*$/)
@@ -109,7 +109,7 @@ const auditQuerySchema = z
       .regex(/^[1-9]\d{0,2}$/)
       .transform(Number)
       .pipe(z.number().max(100))
-      .default('20'),
+      .default(20),
     cursor: z
       .string()
       .regex(/^[1-9]\d*$/)
