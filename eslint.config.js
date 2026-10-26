@@ -5,7 +5,7 @@ export default antfu(
     type: 'lib',
     typescript: true,
     vue: true,
-    // Tests use node:test, not Vitest. pnpm-workspace.yaml only approves builds.
+    // Tests use node:test, not Vitest. npm is the only supported package manager.
     test: false,
     pnpm: false,
     stylistic: {
@@ -21,7 +21,6 @@ export default antfu(
     },
     ignores: [
       'package-lock.json',
-      'pnpm-lock.yaml',
       'migrations/**',
     ],
   },
