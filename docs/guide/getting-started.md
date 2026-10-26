@@ -4,11 +4,11 @@ This walkthrough runs JaGate on your computer and asks for approval before writi
 
 ## 1. Check Node.js and build
 
-JaGate requires Node.js 24.21.0 for this release. From the repository root:
+JaGate requires Node.js 24.22.1 for this release. From the repository root:
 
 ```sh
 nvm use                 # if you use nvm
-node -v                 # v24.21.0
+node -v                 # v24.22.1
 npm ci
 npm run build
 npm run demo:fake

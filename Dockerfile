@@ -1,4 +1,4 @@
-FROM node:24.21.0-bookworm-slim AS build
+FROM node:24.22.1-bookworm-slim AS build
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
@@ -10,7 +10,7 @@ COPY assets ./assets
 COPY console ./console
 RUN npm run build && npm run console:build && npm prune --omit=dev
 
-FROM node:24.21.0-bookworm-slim
+FROM node:24.22.1-bookworm-slim
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app/package.json ./package.json

@@ -4,7 +4,7 @@ The playground is a development-only Vue interface for exercising JaGate's HTTP 
 
 ## Start it
 
-Use Node.js 24.21.0. From the repository root:
+Use Node.js 24.22.1. From the repository root:
 
 ```sh
 nvm use

@@ -1,9 +1,9 @@
 # Cloud Agent development image for JaGate.
-# Pins Node.js to the version required by package.json ("engines": ">=24.21.0 <25")
-# and the project's own production Dockerfile / .nvmrc (24.21.0), and adds the
+# Pins Node.js to the version required by package.json ("engines": ">=24.22.1 <25")
+# and the project's own production Dockerfile / .nvmrc (24.22.1), and adds the
 # toolchain needed to build the better-sqlite3 native addon when a prebuilt
 # binary is unavailable.
-FROM node:24.21.0-bookworm-slim
+FROM node:24.22.1-bookworm-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

@@ -1,6 +1,6 @@
 # Contributing and documentation
 
-The source repository is [ahmetomerv/JaGate](https://github.com/ahmetomerv/JaGate). Read the [contribution guide](https://github.com/ahmetomerv/JaGate/blob/main/CONTRIBUTING.md) and [changelog](https://github.com/ahmetomerv/JaGate/blob/main/CHANGELOG.md) before submitting changes. Use Node.js 24.21.0.
+The source repository is [ahmetomerv/JaGate](https://github.com/ahmetomerv/JaGate). Read the [contribution guide](https://github.com/ahmetomerv/JaGate/blob/main/CONTRIBUTING.md) and [changelog](https://github.com/ahmetomerv/JaGate/blob/main/CHANGELOG.md) before submitting changes. Use Node.js 24.22.1.
 
 Documentation lives in `docs/` and is built with VitePress. From the repository root:
 

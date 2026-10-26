@@ -4,7 +4,7 @@
 
 Self-hosted human approval before your application acts.
 
-[![Documentation](https://img.shields.io/badge/docs-JaGate-111111)](https://ahmetomerv.github.io/JaGate/) [![CI and docs](https://github.com/ahmetomerv/JaGate/actions/workflows/pages.yml/badge.svg)](https://github.com/ahmetomerv/JaGate/actions/workflows/pages.yml) [![Node.js](https://img.shields.io/badge/node-%3E%3D24.21.0-339933?logo=node.js&logoColor=white)](https://nodejs.org/) [![License: MIT](https://img.shields.io/badge/license-MIT-brightgreen)](https://opensource.org/licenses/MIT)
+[![Documentation](https://img.shields.io/badge/docs-JaGate-111111)](https://ahmetomerv.github.io/JaGate/) [![CI and docs](https://github.com/ahmetomerv/JaGate/actions/workflows/pages.yml/badge.svg)](https://github.com/ahmetomerv/JaGate/actions/workflows/pages.yml) [![Node.js](https://img.shields.io/badge/node-%3E%3D24.22.1-339933?logo=node.js&logoColor=white)](https://nodejs.org/) [![License: MIT](https://img.shields.io/badge/license-MIT-brightgreen)](https://opensource.org/licenses/MIT)
 
 JaGate is a small approval service for consequential actions: deploying a release, publishing a post, deleting a backup, or starting a maintenance job. Your application submits what it wants to do. A human decides in Telegram. After approval, the application claims the decision once, performs the action with its own credentials, and reports the outcome.
 
@@ -24,7 +24,7 @@ A request is `pending` until an allowlisted person approves or rejects it in the
 
 ## Quick start
 
-JaGate needs Node.js 24.21.0, a SQLite file, and one dedicated Telegram bot. No public URL or webhook is required because the gateway uses Telegram long polling.
+JaGate needs Node.js 24.22.1, a SQLite file, and one dedicated Telegram bot. No public URL or webhook is required because the gateway uses Telegram long polling.
 
 Check the full lifecycle without a bot, network, or `.env`:
 
@@ -136,7 +136,7 @@ If the decision is `rejected`, `expired`, or `cancelled`, do not perform the act
 
 ## Developing
 
-Follow the [local setup guide](https://ahmetomerv.github.io/JaGate/guide/getting-started.html). Node.js 24.21.0 is required. From the repository root, `npm ci` then `npm run verify` runs typecheck, tests, lint, and the server, console, docs, and playground builds.
+Follow the [local setup guide](https://ahmetomerv.github.io/JaGate/guide/getting-started.html). Node.js 24.22.1 is required. From the repository root, `npm ci` then `npm run verify` runs typecheck, tests, lint, and the server, console, docs, and playground builds.
 
 `npm run demo:fake` walks through one approval with an in-memory database and a fake Telegram transport.
 
