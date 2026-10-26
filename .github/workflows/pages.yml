@@ -1,4 +1,4 @@
-name: Verify and publish docs
+name: CI and docs
 
 on:
   push:
