@@ -36,3 +36,7 @@ The console is static files served by the gateway on the same origin as the API.
 Use an issued key with `requests:read` for daily viewing. Add `requests:cancel` only when that browser should cancel pending requests. Key issuance, revocation, and the audit feed require the bootstrap key. The console has no control that approves, rejects, claims, or reports a result. A claimed request with no reported result is shown as an unknown external outcome.
 
 Metadata is visible in the console and was not sent to Telegram. Treat the console like the API: loopback by default, and a private network or authenticated TLS reverse proxy if a remote operator must reach it. Request text is rendered as text.
+
+## Reporting a vulnerability
+
+Report suspected vulnerabilities privately through [GitHub's private vulnerability reporting](https://github.com/ahmetomerv/JaGate/security/advisories/new). Do not open a public issue with details. Include the affected version or commit, deployment shape, reproduction steps, and impact. Never include real client keys, the bot token, claim tokens, request databases, or production message content; redact identifiers first. The repository's [security policy](https://github.com/ahmetomerv/JaGate/blob/main/SECURITY.md) describes the full process and scope.

@@ -17,3 +17,5 @@ The site uses base path `/JaGate/` because the repository is published as a GitH
 The public website is deployed from the VitePress build artifact. Documentation files and generated website assets are excluded from the npm package, whose README links to the site.
 
 Whenever code, configuration, or behavior changes, update the relevant guide, API reference, architecture page, and examples in the same change. The Pages workflow builds and checks the docs on pull requests and on every push to `main`; it deploys the built site after a successful `main` push. To activate the first deployment, select **Settings → Pages → Build and deployment → Source: GitHub Actions** in the repository. No bot token or client key is needed to build the public docs site.
+
+Report suspected vulnerabilities privately through [GitHub's private vulnerability reporting](https://github.com/ahmetomerv/JaGate/security/advisories/new), not in a public issue. The repository's [security policy](https://github.com/ahmetomerv/JaGate/blob/main/SECURITY.md) describes the process and scope.
