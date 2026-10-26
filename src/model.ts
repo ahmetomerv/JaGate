@@ -24,7 +24,7 @@ const jsonValue: z.ZodType<JsonValue> = z.lazy(() =>
     z.boolean(),
     z.null(),
     z.array(jsonValue),
-    z.record(jsonValue),
+    z.record(z.string(), jsonValue),
   ]),
 );
 
@@ -44,7 +44,7 @@ export const createSchema = z
     description: text(1000),
     details: z.array(detailSchema).max(10).default([]),
     expiresInSeconds: z.number().int().min(60).max(86400),
-    metadata: z.record(jsonValue).default({}),
+    metadata: z.record(z.string(), jsonValue).default({}),
   })
   .strict()
   .refine(v => Buffer.byteLength(JSON.stringify(v.metadata)) <= 2048, {
