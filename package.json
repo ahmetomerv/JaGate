@@ -76,10 +76,10 @@
     "prettier": "^3.9.9",
     "tsx": "^4.23.13",
     "typescript": "~6.0.3",
-    "vite": "^7.3.7",
+    "vite": "^8.3.5",
     "vitepress": "^1.6.4",
     "vue": "^3.5.44",
-    "vue-router": "^4.6.4",
+    "vue-router": "^5.4.0",
     "vue-tsc": "^3.3.13"
   },
   "overrides": {
