@@ -93,7 +93,12 @@ const commandSchema = z
       'health',
       'ready',
     ]),
-    auth: z.enum(['valid', 'scoped', 'missing', 'invalid']).default('valid'),
+    auth: z.enum([
+      'valid',
+      'scoped',
+      'missing',
+      'invalid',
+    ]).default('valid'),
     scopedKey: z.string().max(128).optional(),
     requestId: z.string().max(128).optional(),
     keyId: z.string().max(128).optional(),
@@ -137,9 +142,27 @@ const commandSchema = z
   .strict();
 
 const routes: ReadonlyMap<ClientId, TelegramRoute> = new Map([
-  ['ci-pipeline', { chatId: '-1001', approverIds: new Set(['101']) }],
-  ['cloud-ops', { chatId: '-1002', approverIds: new Set(['202']) }],
-  ['billing-service', { chatId: '-1003', approverIds: new Set(['303']) }],
+  [
+    'ci-pipeline',
+    {
+      chatId: '-1001',
+      approverIds: new Set(['101']),
+    },
+  ],
+  [
+    'cloud-ops',
+    {
+      chatId: '-1002',
+      approverIds: new Set(['202']),
+    },
+  ],
+  [
+    'billing-service',
+    {
+      chatId: '-1003',
+      approverIds: new Set(['303']),
+    },
+  ],
 ]);
 
 class SimulatedTelegram implements TelegramTransport {
@@ -200,7 +223,10 @@ export function createPlayground(options: PlaygroundOptions) {
   let clockOffsetMs = Number(savedOffset?.value ?? 0);
   const core = new GatewayCore(db, () => new Date(Date.now() + clockOffsetMs));
   const simulatedKeys = new Map<ClientId, string>(
-    clients.map(id => [id, randomBytes(32).toString('base64url')]),
+    clients.map(id => [
+      id,
+      randomBytes(32).toString('base64url'),
+    ]),
   );
   const simulatedApi = createHttpServer(core, simulatedKeys, () => true);
   const lastMessage = db
@@ -226,7 +252,11 @@ export function createPlayground(options: PlaygroundOptions) {
       token: accessToken,
       simulatedClients: clients,
       simulatedExamples,
-      liveClients: liveKeys ? [...liveKeys.keys()] : [],
+      liveClients: liveKeys
+        ? [
+            ...liveKeys.keys(),
+          ]
+        : [],
       gatewayUrl: liveUrl,
       simulatedNow: new Date(Date.now() + clockOffsetMs).toISOString(),
       failNextDelivery: transport.failNextSend,
@@ -250,10 +280,20 @@ export function createPlayground(options: PlaygroundOptions) {
       auditPage,
       payload,
     } = parsed.data;
-    if (mode === 'simulated' ? !clientSchema.safeParse(clientId).success : !liveKeys?.has(clientId))
+    if (mode === 'simulated'
+      ? !clientSchema.safeParse(clientId).success
+      : !liveKeys?.has(clientId)) {
       return reply.code(400).send({ error: 'Unknown client for this mode' });
-    if (['get', 'events', 'cancel', 'claim', 'result'].includes(operation) && !requestId)
+    }
+    if ([
+      'get',
+      'events',
+      'cancel',
+      'claim',
+      'result',
+    ].includes(operation) && !requestId) {
       return reply.code(400).send({ error: 'Select or enter a request ID' });
+    }
     if (operation === 'keyRevoke' && !keyId)
       return reply.code(400).send({ error: 'Select or enter a client key ID' });
     if (auth === 'scoped' && !scopedKey)
@@ -270,7 +310,9 @@ export function createPlayground(options: PlaygroundOptions) {
               : operation === 'keyRevoke'
                 ? `/v1/client-keys/${encodeURIComponent(keyId!)}/revoke`
                 : `/v1/requests/${encodeURIComponent(requestId!)}${
-                  operation === 'get' ? '' : `/${operation}`}`;
+                  operation === 'get'
+                    ? ''
+                    : `/${operation}`}`;
     const query = new URLSearchParams();
     if (operation === 'list' && filters) {
       for (const [key, value] of Object.entries(filters)) {
@@ -296,41 +338,74 @@ export function createPlayground(options: PlaygroundOptions) {
           query.set(key, String(value));
       }
     }
-    const url = `${path}${query.size ? `?${query}` : ''}`;
-    const method = ['list', 'get', 'events', 'keyList', 'audit', 'health', 'ready'].includes(
+    const url = `${path}${query.size
+      ? `?${query}`
+      : ''}`;
+    const method = [
+      'list',
+      'get',
+      'events',
+      'keyList',
+      'audit',
+      'health',
+      'ready',
+    ].includes(
       operation,
     )
       ? 'GET'
       : 'POST';
     const key
-      = mode === 'simulated' ? simulatedKeys.get(clientId as ClientId)! : liveKeys!.get(clientId)!;
+      = mode === 'simulated'
+        ? simulatedKeys.get(clientId as ClientId)!
+        : liveKeys!.get(clientId)!;
     const authorization
       = auth === 'missing'
         ? undefined
-        : `Bearer ${auth === 'invalid' ? 'invalid-playground-key' : auth === 'scoped' ? scopedKey : key}`;
+        : `Bearer ${auth === 'invalid'
+          ? 'invalid-playground-key'
+          : auth === 'scoped'
+            ? scopedKey
+            : key}`;
     const headers = {
-      ...(authorization ? { authorization } : {}),
-      ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
+      ...(authorization
+        ? { authorization }
+        : {}),
+      ...(method === 'POST'
+        ? { 'content-type': 'application/json' }
+        : {}),
     };
     const body
-      = operation === 'create' || operation === 'result' || operation === 'keyCreate' ? payload : {};
+      = operation === 'create' || operation === 'result' || operation === 'keyCreate'
+        ? payload
+        : {};
 
     if (mode === 'simulated') {
       const result = await simulatedApi.inject({
         method,
         url,
         headers,
-        ...(method === 'POST' ? { payload: JSON.stringify(body ?? {}) } : {}),
+        ...(method === 'POST'
+          ? {
+              payload: JSON.stringify(body ?? {}),
+            }
+          : {}),
       });
       if (operation === 'create' && result.statusCode === 201)
         await telegram.deliverDue();
-      return { status: result.statusCode, body: result.json() as unknown };
+      return {
+        status: result.statusCode,
+        body: result.json() as unknown,
+      };
     }
     try {
       const response = await fetcher(new URL(url, liveUrl), {
         method,
         headers,
-        ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}),
+        ...(method === 'POST'
+          ? {
+              body: JSON.stringify(body ?? {}),
+            }
+          : {}),
         signal: AbortSignal.timeout(10_000),
       });
       return { status: response.status, body: (await response.json()) as unknown };
@@ -379,15 +454,26 @@ export function createPlayground(options: PlaygroundOptions) {
       update_id: 0,
       callback_query: {
         id: callbackId,
-        data: `${decision === 'approve' ? 'a' : 'r'}:${row.callback_ref}`,
-        from: { id: actor === 'allowed' ? Number([...route.approverIds][0]) : 999 },
+        data: `${decision === 'approve'
+          ? 'a'
+          : 'r'}:${row.callback_ref}`,
+        from: {
+          id: actor === 'allowed'
+            ? Number([...route.approverIds][0])
+            : 999,
+        },
         message: {
-          chat: { id: Number(row.delivery_chat_id) },
+          chat: {
+            id: Number(row.delivery_chat_id),
+          },
           message_id: Number(row.delivery_message_id),
         },
       },
     });
-    return { message: transport.answers.get(callbackId), request: core.get(clientId, requestId) };
+    return {
+      message: transport.answers.get(callbackId),
+      request: core.get(clientId, requestId),
+    };
   });
 
   app.post('/api/fail-next-delivery', async () => {
@@ -397,7 +483,9 @@ export function createPlayground(options: PlaygroundOptions) {
 
   app.post('/api/advance-time', async (request, reply) => {
     const parsed = z
-      .object({ seconds: z.number().int().min(1).max(86_400) })
+      .object({
+        seconds: z.number().int().min(1).max(86_400),
+      })
       .strict()
       .safeParse(request.body);
     if (!parsed.success)
@@ -406,7 +494,10 @@ export function createPlayground(options: PlaygroundOptions) {
     db.prepare(
       'INSERT INTO settings(key,value) VALUES (\'playground_clock_offset_ms\',?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
     ).run(String(clockOffsetMs));
-    return { now: new Date(Date.now() + clockOffsetMs).toISOString(), expired: core.expire() };
+    return {
+      now: new Date(Date.now() + clockOffsetMs).toISOString(),
+      expired: core.expire(),
+    };
   });
 
   app.addHook('onClose', async () => {

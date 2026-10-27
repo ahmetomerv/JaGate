@@ -41,7 +41,11 @@ export function formatMessage(job: DeliveryJob, status?: string): string {
   const details = view.details
     .map(({ label, value }) => `<b>${escapeHtml(label)}:</b> ${escapeHtml(value)}`)
     .join('\n');
-  return `<b>${escapeHtml(view.title)}</b>\n${escapeHtml(view.description)}${details ? `\n\n${details}` : ''}\n\nClient: <code>${escapeHtml(view.clientId)}</code>\nAction: <code>${escapeHtml(view.action)}</code>\nRequest: <code>${view.id.slice(0, 8)}</code>\nExpires: ${escapeHtml(view.expiresAt)}${status ? `\nStatus: <b>${escapeHtml(status)}</b>` : ''}`;
+  return `<b>${escapeHtml(view.title)}</b>\n${escapeHtml(view.description)}${details
+    ? `\n\n${details}`
+    : ''}\n\nClient: <code>${escapeHtml(view.clientId)}</code>\nAction: <code>${escapeHtml(view.action)}</code>\nRequest: <code>${view.id.slice(0, 8)}</code>\nExpires: ${escapeHtml(view.expiresAt)}${status
+    ? `\nStatus: <b>${escapeHtml(status)}</b>`
+    : ''}`;
 }
 
 export class HttpTelegramTransport implements TelegramTransport {
@@ -57,12 +61,16 @@ export class HttpTelegramTransport implements TelegramTransport {
   ): Promise<T> {
     let response: Response;
     try {
-      const timeout = AbortSignal.timeout(method === 'getUpdates' ? 30_000 : 10_000);
+      const timeout = AbortSignal.timeout(method === 'getUpdates'
+        ? 30_000
+        : 10_000);
       response = await this.fetcher(`https://api.telegram.org/bot${this.token}/${method}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
-        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        signal: signal
+          ? AbortSignal.any([signal, timeout])
+          : timeout,
       });
     }
     catch {
@@ -113,7 +121,11 @@ export class HttpTelegramTransport implements TelegramTransport {
       }
     }
     try {
-      await this.call('getUpdates', { timeout: 0, limit: 1, allowed_updates: ['callback_query'] });
+      await this.call('getUpdates', {
+        timeout: 0,
+        limit: 1,
+        allowed_updates: ['callback_query'],
+      });
     }
     catch (error) {
       if (error instanceof TelegramApiError && error.kind === 'conflict') {
@@ -147,13 +159,21 @@ export class HttpTelegramTransport implements TelegramTransport {
   poll(offset: number, signal: AbortSignal): Promise<Update[]> {
     return this.call<Update[]>(
       'getUpdates',
-      { offset, timeout: 20, limit: 50, allowed_updates: ['callback_query'] },
+      {
+        offset,
+        timeout: 20,
+        limit: 50,
+        allowed_updates: ['callback_query'],
+      },
       signal,
     );
   }
 
   async answer(id: string, text: string): Promise<void> {
-    await this.call('answerCallbackQuery', { callback_query_id: id, text: text.slice(0, 180) });
+    await this.call('answerCallbackQuery', {
+      callback_query_id: id,
+      text: text.slice(0, 180),
+    });
   }
 
   async edit(job: DeliveryJob, chatId: string, messageId: string, status: string): Promise<void> {
@@ -187,7 +207,9 @@ export class TelegramGateway {
   }
 
   async start(): Promise<void> {
-    await this.transport.check(new Set([...this.routes.values()].map(route => route.chatId)));
+    await this.transport.check(new Set([
+      ...this.routes.values(),
+    ].map(route => route.chatId)));
     this.core.requeueMovedDestinations(
       new Map([...this.routes].map(([id, route]) => [id, route.chatId])),
     );
@@ -235,7 +257,9 @@ export class TelegramGateway {
           this.deliveryReady = false;
           const retryable = !(error instanceof TelegramApiError) || error.retryable;
           const reason
-            = error instanceof TelegramApiError ? error.message : 'Telegram network request failed';
+            = error instanceof TelegramApiError
+              ? error.message
+              : 'Telegram network request failed';
           this.core.deliveryFailed(job.id, retryable, reason);
           this.onError(`Telegram delivery failed for request ${job.id}: ${reason}`);
         }
@@ -280,7 +304,9 @@ export class TelegramGateway {
       route.chatId,
       String(callback.message.message_id),
       String(callback.from.id),
-      match[1] === 'a' ? 'approved' : 'rejected',
+      match[1] === 'a'
+        ? 'approved'
+        : 'rejected',
     );
     await answer(result.outcome);
     if (result.request && (result.outcome === 'Approved.' || result.outcome === 'Rejected.')) {

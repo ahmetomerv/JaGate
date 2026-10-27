@@ -15,7 +15,9 @@ export function isUnknownOutcome(request: {
 }
 
 export function cutoffIso(now: Date, windowMs: number, direction: 'past' | 'future'): string {
-  const delta = direction === 'past' ? -windowMs : windowMs;
+  const delta = direction === 'past'
+    ? -windowMs
+    : windowMs;
   return new Date(now.getTime() + delta).toISOString();
 }
 

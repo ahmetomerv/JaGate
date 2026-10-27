@@ -23,9 +23,25 @@ const utcTimestampSchema = z
   .transform(value => new Date(value).toISOString());
 const listQuerySchema = z
   .object({
-    status: z.enum(['pending', 'approved', 'rejected', 'expired', 'cancelled']).optional(),
-    deliveryStatus: z.enum(['pending', 'retrying', 'delivered', 'failed']).optional(),
-    executionStatus: z.enum(['unclaimed', 'claimed', 'succeeded', 'failed']).optional(),
+    status: z.enum([
+      'pending',
+      'approved',
+      'rejected',
+      'expired',
+      'cancelled',
+    ]).optional(),
+    deliveryStatus: z.enum([
+      'pending',
+      'retrying',
+      'delivered',
+      'failed',
+    ]).optional(),
+    executionStatus: z.enum([
+      'unclaimed',
+      'claimed',
+      'succeeded',
+      'failed',
+    ]).optional(),
     claimedBefore: utcTimestampSchema.optional(),
     expiresBefore: utcTimestampSchema.optional(),
     limit: z
@@ -41,7 +57,10 @@ const listQuerySchema = z
       .optional(),
   })
   .strict();
-const cursorSchema = z.tuple([z.string().datetime(), idSchema]);
+const cursorSchema = z.tuple([
+  z.string().datetime(),
+  idSchema,
+]);
 const eventsQuerySchema = z
   .object({
     limit: z
@@ -175,14 +194,19 @@ export function createHttpServer(
     if (error instanceof GatewayError) {
       return reply
         .code(error.statusCode)
-        .send({ error: { code: error.code, message: error.message } });
+        .send({
+          error: { code: error.code, message: error.message },
+        });
     }
     if (error instanceof ZodError) {
       return reply.code(400).send({
         error: {
           code: 'invalid_input',
           message: 'request validation failed',
-          issues: error.issues.map(({ path, message }) => ({ path: path.join('.'), message })),
+          issues: error.issues.map(({ path, message }) => ({
+            path: path.join('.'),
+            message,
+          })),
         },
       });
     }
@@ -194,11 +218,15 @@ export function createHttpServer(
     ) {
       return reply
         .code(error.statusCode)
-        .send({ error: { code: 'invalid_input', message: 'invalid request body' } });
+        .send({
+          error: { code: 'invalid_input', message: 'invalid request body' },
+        });
     }
     return reply
       .code(500)
-      .send({ error: { code: 'internal_error', message: 'internal server error' } });
+      .send({
+        error: { code: 'internal_error', message: 'internal server error' },
+      });
   });
   app.get('/health', async () => ({ status: 'ok' }));
   app.get('/ready', async (_request, reply) => {
@@ -211,7 +239,9 @@ export function createHttpServer(
     }
     const telegram = telegramReady();
     return reply
-      .code(storage && telegram ? 200 : 503)
+      .code(storage && telegram
+        ? 200
+        : 503)
       .send({ ready: storage && telegram, storage, telegram });
   });
   app.register(
@@ -228,14 +258,18 @@ export function createHttpServer(
           return;
         }
         const header = request.headers.authorization;
-        const key = header?.startsWith('Bearer ') && header.length <= 256 ? header.slice(7) : '';
+        const key = header?.startsWith('Bearer ') && header.length <= 256
+          ? header.slice(7)
+          : '';
         const stored = /^jgk_[\w-]{43}$/.test(key)
           ? core.authenticateClientKey(key)
           : undefined;
         if (!stored || !clientKeys.has(stored.clientId)) {
           return reply
             .code(401)
-            .send({ error: { code: 'unauthorized', message: 'valid client bearer key required' } });
+            .send({
+              error: { code: 'unauthorized', message: 'valid client bearer key required' },
+            });
         }
         request.clientId = stored.clientId;
         request.issuedKeyId = stored.id;
@@ -258,12 +292,24 @@ export function createHttpServer(
         const before = decodeCursor(cursor);
         return core.list(request.clientId, {
           limit: filters.limit,
-          ...(filters.status ? { status: filters.status } : {}),
-          ...(filters.deliveryStatus ? { deliveryStatus: filters.deliveryStatus } : {}),
-          ...(filters.executionStatus ? { executionStatus: filters.executionStatus } : {}),
-          ...(filters.claimedBefore ? { claimedBefore: filters.claimedBefore } : {}),
-          ...(filters.expiresBefore ? { expiresBefore: filters.expiresBefore } : {}),
-          ...(before ? { before } : {}),
+          ...(filters.status
+            ? { status: filters.status }
+            : {}),
+          ...(filters.deliveryStatus
+            ? { deliveryStatus: filters.deliveryStatus }
+            : {}),
+          ...(filters.executionStatus
+            ? { executionStatus: filters.executionStatus }
+            : {}),
+          ...(filters.claimedBefore
+            ? { claimedBefore: filters.claimedBefore }
+            : {}),
+          ...(filters.expiresBefore
+            ? { expiresBefore: filters.expiresBefore }
+            : {}),
+          ...(before
+            ? { before }
+            : {}),
         });
       });
       v1.get('/requests/:id', async (request) => {
@@ -276,7 +322,11 @@ export function createHttpServer(
         const { limit, cursor } = eventsQuerySchema.parse(request.query);
         return core.events(request.clientId, id, {
           limit,
-          ...(cursor ? { after: Number(cursor) } : {}),
+          ...(cursor
+            ? {
+                after: Number(cursor),
+              }
+            : {}),
         });
       });
       v1.post('/requests/:id/cancel', async (request) => {
@@ -315,7 +365,12 @@ export function createHttpServer(
         requireBootstrapKey(request);
         const { limit, cursor } = keyListQuerySchema.parse(request.query);
         const before = decodeCursor(cursor);
-        return core.listClientKeys(request.clientId, { limit, ...(before ? { before } : {}) });
+        return core.listClientKeys(request.clientId, {
+          limit,
+          ...(before
+            ? { before }
+            : {}),
+        });
       });
       v1.post('/client-keys/:id/revoke', async (request) => {
         requireBootstrapKey(request);
@@ -329,9 +384,17 @@ export function createHttpServer(
         const { limit, cursor, requestId, keyId } = auditQuerySchema.parse(request.query);
         return core.listAuditEvents(request.clientId, {
           limit,
-          ...(cursor ? { before: Number(cursor) } : {}),
-          ...(requestId ? { requestId } : {}),
-          ...(keyId ? { keyId } : {}),
+          ...(cursor
+            ? {
+                before: Number(cursor),
+              }
+            : {}),
+          ...(requestId
+            ? { requestId }
+            : {}),
+          ...(keyId
+            ? { keyId }
+            : {}),
         });
       });
     },

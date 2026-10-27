@@ -36,13 +36,21 @@ async function call(
   payload?: unknown,
 ) {
   return app.inject({
-    method: payload === undefined ? 'GET' : 'POST',
+    method: payload === undefined
+      ? 'GET'
+      : 'POST',
     url,
     headers: {
       'x-playground-token': session,
-      ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
+      ...(payload === undefined
+        ? {}
+        : { 'content-type': 'application/json' }),
     },
-    ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }),
+    ...(payload === undefined
+      ? {}
+      : {
+          payload: JSON.stringify(payload),
+        }),
   });
 }
 
@@ -52,14 +60,22 @@ function input(idempotencyKey = 'playground:test') {
     action: 'local-test',
     title: 'Test approval',
     description: 'Harmless local approval',
-    details: [{ label: 'Target', value: 'local' }],
+    details: [
+      { label: 'Target', value: 'local' },
+    ],
     metadata: { source: 'test' },
     expiresInSeconds: 900,
   };
 }
 
 function command(operation: string, extras: Record<string, unknown> = {}) {
-  return { mode: 'simulated', clientId: 'ci-pipeline', operation, auth: 'valid', ...extras };
+  return {
+    mode: 'simulated',
+    clientId: 'ci-pipeline',
+    operation,
+    auth: 'valid',
+    ...extras,
+  };
 }
 
 test('three simulated clients have distinct, usable approval scenarios', async () => {
@@ -121,7 +137,9 @@ test('playground guards commands and exercises HTTP auth, ownership and idempote
       await app.inject({
         method: 'POST',
         url: '/api/execute',
-        payload: command('create', { payload: input() }),
+        payload: command('create', {
+          payload: input(),
+        }),
       })
     ).statusCode,
     403,
@@ -132,7 +150,9 @@ test('playground guards commands and exercises HTTP auth, ownership and idempote
     ['ci-pipeline', 'cloud-ops', 'billing-service'],
   );
   const first = (
-    await call(app, session, '/api/execute', command('create', { payload: input() }))
+    await call(app, session, '/api/execute', command('create', {
+      payload: input(),
+    }))
   ).json() as { status: number; body: { id: string } };
   assert.equal(first.status, 201);
   const id = first.body.id;
@@ -141,7 +161,9 @@ test('playground guards commands and exercises HTTP auth, ownership and idempote
       app,
       session,
       '/api/execute',
-      command('list', { filters: { deliveryStatus: 'delivered' } }),
+      command('list', {
+        filters: { deliveryStatus: 'delivered' },
+      }),
     )
   ).json();
   assert.equal(listed.status, 200);
@@ -165,7 +187,9 @@ test('playground guards commands and exercises HTTP auth, ownership and idempote
     401,
   );
   assert.equal(
-    (await call(app, session, '/api/execute', command('create', { payload: input() }))).json()
+    (await call(app, session, '/api/execute', command('create', {
+      payload: input(),
+    }))).json()
       .status,
     200,
   );
@@ -175,7 +199,12 @@ test('playground guards commands and exercises HTTP auth, ownership and idempote
         app,
         session,
         '/api/execute',
-        command('create', { payload: { ...input(), title: 'Changed' } }),
+        command('create', {
+          payload: {
+            ...input(),
+            title: 'Changed',
+          },
+        }),
       )
     ).json().status,
     409,
@@ -219,7 +248,10 @@ test('playground guards commands and exercises HTTP auth, ownership and idempote
       app,
       session,
       '/api/execute',
-      command('events', { requestId: id, eventPage: { limit: 1 } }),
+      command('events', {
+        requestId: id,
+        eventPage: { limit: 1 },
+      }),
     )
   ).json();
   assert.equal(timeline.status, 200);
@@ -234,7 +266,10 @@ test('playground guards commands and exercises HTTP auth, ownership and idempote
         app,
         session,
         '/api/execute',
-        command('events', { requestId: id, eventPage: { cursor: '1' } }),
+        command('events', {
+          requestId: id,
+          eventPage: { cursor: '1' },
+        }),
       )
     )
       .json()
@@ -277,7 +312,9 @@ test('playground forwards attention cutoffs and exposes its simulated clock for 
       app,
       boot.token,
       '/api/execute',
-      command('create', { payload: input('attention:playground') }),
+      command('create', {
+        payload: input('attention:playground'),
+      }),
     )
   ).json();
   const expiresAt = created.body.expiresAt as string;
@@ -321,7 +358,9 @@ test('simulated decisions honor approvers, claims and one-time results across re
       app,
       session,
       '/api/execute',
-      command('create', { payload: input('playground:decision') }),
+      command('create', {
+        payload: input('playground:decision'),
+      }),
     )
   ).json();
   const id = created.body.id as string;
@@ -360,7 +399,11 @@ test('simulated decisions honor approvers, claims and one-time results across re
         '/api/execute',
         command('result', {
           requestId: id,
-          payload: { claimToken: 'x'.repeat(43), status: 'succeeded', summary: 'Wrong token' },
+          payload: {
+            claimToken: 'x'.repeat(43),
+            status: 'succeeded',
+            summary: 'Wrong token',
+          },
         }),
       )
     ).json().status,
@@ -429,7 +472,9 @@ test('playground can fail the next simulated Telegram delivery', async () => {
       app,
       session,
       '/api/execute',
-      command('create', { payload: input('playground:fail-delivery') }),
+      command('create', {
+        payload: input('playground:fail-delivery'),
+      }),
     )
   ).json();
   assert.equal(failed.status, 201);
@@ -468,7 +513,9 @@ test('playground can fail the next simulated Telegram delivery', async () => {
       app,
       session,
       '/api/execute',
-      command('create', { payload: input('playground:deliver-again') }),
+      command('create', {
+        payload: input('playground:deliver-again'),
+      }),
     )
   ).json();
   assert.equal(
@@ -486,7 +533,12 @@ test('simulated clock expires pending requests and cancellation stops decisions'
       app,
       session,
       '/api/execute',
-      command('create', { payload: { ...input('playground:expiry'), expiresInSeconds: 60 } }),
+      command('create', {
+        payload: {
+          ...input('playground:expiry'),
+          expiresInSeconds: 60,
+        },
+      }),
     )
   ).json();
   const id = expiring.body.id as string;
@@ -512,7 +564,9 @@ test('simulated clock expires pending requests and cancellation stops decisions'
       app,
       session,
       '/api/execute',
-      command('create', { payload: input('playground:cancel') }),
+      command('create', {
+        payload: input('playground:cancel'),
+      }),
     )
   ).json();
   const pendingId = pending.body.id as string;
@@ -543,7 +597,10 @@ test('playground issues and revokes scoped keys through simulated HTTP routes', 
       session,
       '/api/execute',
       command('keyCreate', {
-        payload: { label: 'Playground reader', scopes: ['requests:read'] },
+        payload: {
+          label: 'Playground reader',
+          scopes: ['requests:read'],
+        },
       }),
     )
   ).json();
@@ -552,7 +609,9 @@ test('playground issues and revokes scoped keys through simulated HTTP routes', 
   const keyId = created.body.id as string;
   const scopedKey = created.body.key as string;
   const listed = (
-    await call(app, session, '/api/execute', command('keyList', { keyPage: { limit: 1 } }))
+    await call(app, session, '/api/execute', command('keyList', {
+      keyPage: { limit: 1 },
+    }))
   ).json();
   assert.equal(listed.status, 200);
   assert.deepEqual(
@@ -570,7 +629,11 @@ test('playground issues and revokes scoped keys through simulated HTTP routes', 
         app,
         session,
         '/api/execute',
-        command('create', { auth: 'scoped', scopedKey, payload: input('scoped:denied') }),
+        command('create', {
+          auth: 'scoped',
+          scopedKey,
+          payload: input('scoped:denied'),
+        }),
       )
     ).json().status,
     403,
@@ -617,7 +680,11 @@ test('playground can inspect key expiry and client audit records in simulation',
       boot.token,
       '/api/execute',
       command('keyCreate', {
-        payload: { label: 'Temporary creator', scopes: ['requests:create'], expiresAt },
+        payload: {
+          label: 'Temporary creator',
+          scopes: ['requests:create'],
+          expiresAt,
+        },
       }),
     )
   ).json();
@@ -701,14 +768,20 @@ test('live mode keeps client keys in the backend while calling the real HTTP rou
   dirs.push(dir);
   const db = openDatabase(join(dir, 'gateway.sqlite'));
   const key = 'a'.repeat(32);
-  const gateway = createHttpServer(new GatewayCore(db), new Map([['website', key]]), () => true);
+  const gateway = createHttpServer(new GatewayCore(db), new Map([
+    ['website', key],
+  ]), () => true);
   try {
     const fetcher: typeof fetch = async (url, init) => {
       const response = await gateway.inject({
         method: (init?.method ?? 'GET') as 'GET' | 'POST',
         url: new URL(String(url)).pathname + new URL(String(url)).search,
         headers: init?.headers as Record<string, string>,
-        ...(init?.body ? { payload: String(init.body) } : {}),
+        ...(init?.body
+          ? {
+              payload: String(init.body),
+            }
+          : {}),
       });
       return new Response(response.body, {
         status: response.statusCode,
@@ -717,7 +790,9 @@ test('live mode keeps client keys in the backend while calling the real HTTP rou
     };
     const app = createPlayground({
       databasePath: join(dir, 'playground.sqlite'),
-      liveClientKeys: new Map([['website', key]]),
+      liveClientKeys: new Map([
+        ['website', key],
+      ]),
       fetcher,
     });
     apps.push(app);
@@ -777,7 +852,10 @@ test('live mode keeps client keys in the backend while calling the real HTTP rou
         mode: 'live',
         clientId: 'website',
         operation: 'keyCreate',
-        payload: { label: 'Live reader', scopes: ['requests:read'] },
+        payload: {
+          label: 'Live reader',
+          scopes: ['requests:read'],
+        },
       })
     ).json();
     assert.equal(issued.status, 201);

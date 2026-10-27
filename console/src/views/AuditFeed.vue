@@ -22,11 +22,26 @@ async function load(append: boolean): Promise<void> {
   try {
     const page = await api.listAuditEvents({
       limit: 20,
-      ...(append && cursor.value ? { cursor: cursor.value } : {}),
-      ...(requestId.value.trim() ? { requestId: requestId.value.trim() } : {}),
-      ...(keyId.value.trim() ? { keyId: keyId.value.trim() } : {}),
+      ...(append && cursor.value
+        ? { cursor: cursor.value }
+        : {}),
+      ...(requestId.value.trim()
+        ? {
+            requestId: requestId.value.trim(),
+          }
+        : {}),
+      ...(keyId.value.trim()
+        ? {
+            keyId: keyId.value.trim(),
+          }
+        : {}),
     }, signal);
-    events.value = append ? [...events.value, ...page.items] : page.items;
+    events.value = append
+      ? [
+          ...events.value,
+          ...page.items,
+        ]
+      : page.items;
     cursor.value = page.nextCursor;
     error.value = '';
   }

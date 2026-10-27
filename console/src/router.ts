@@ -7,11 +7,23 @@ import RequestInbox from './views/RequestInbox.vue';
 import SignIn from './views/SignIn.vue';
 
 export const routes: RouteRecordRaw[] = [
-  { path: '/', component: SignIn, meta: { public: true } },
+  {
+    path: '/',
+    component: SignIn,
+    meta: { public: true },
+  },
   { path: '/inbox', component: RequestInbox },
   { path: '/requests/:id', component: RequestDetail },
-  { path: '/keys', component: ClientKeys, meta: { bootstrap: true } },
-  { path: '/audit', component: AuditFeed, meta: { bootstrap: true } },
+  {
+    path: '/keys',
+    component: ClientKeys,
+    meta: { bootstrap: true },
+  },
+  {
+    path: '/audit',
+    component: AuditFeed,
+    meta: { bootstrap: true },
+  },
 ];
 
 export function createConsoleRouter(): ReturnType<typeof createRouter> {

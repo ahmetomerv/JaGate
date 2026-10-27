@@ -49,7 +49,10 @@ test('cutoff timestamps move backward for claims and forward for expiry', () => 
 
 test('issued key status treats revoke as terminal and expiry as elapsed', () => {
   const now = new Date('2026-01-01T12:00:00.000Z');
-  assert.equal(keyStatus({ revokedAt: now.toISOString(), expiresAt: null }, now), 'revoked');
+  assert.equal(keyStatus({
+    revokedAt: now.toISOString(),
+    expiresAt: null,
+  }, now), 'revoked');
   assert.equal(keyStatus({
     revokedAt: null,
     expiresAt: '2026-01-01T11:00:00.000Z',
@@ -105,7 +108,12 @@ test('the console API exposes read, cancel, keys, and audit only', () => {
     },
   });
   assert.deepEqual(Object.keys(api).sort(), [...consoleApiMethodNames].sort());
-  for (const method of ['createRequest', 'claim', 'reportResult', 'waitForDecision'] as const)
+  for (const method of [
+    'createRequest',
+    'claim',
+    'reportResult',
+    'waitForDecision',
+  ] as const)
     assert.equal(method in api, false);
   assert.equal(unauthorized, 0);
 });
@@ -118,7 +126,10 @@ test('a 401 clears the session through the unauthorized callback', async () => {
     getKey: () => session.state.key ?? '',
     fetch: async () => new Response(JSON.stringify({
       error: { code: 'unauthorized', message: 'valid client bearer key required' },
-    }), { status: 401, headers: { 'content-type': 'application/json' } }),
+    }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
+    }),
     onUnauthorized: () => session.signOut(),
   });
   await assert.rejects(
@@ -150,7 +161,11 @@ test('list and detail calls forward the bearer key and leave claim routes unused
     baseUrl: 'http://127.0.0.1:3080',
     getKey: () => 'memory-key',
     fetch: async (input, init) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
       seen.push(`${init?.method ?? 'GET'} ${url}`);
       const header = new Headers(init?.headers).get('authorization');
       assert.equal(header, 'Bearer memory-key');

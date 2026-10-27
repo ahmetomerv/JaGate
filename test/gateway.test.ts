@@ -54,12 +54,24 @@ function input(key = 'deploy:abc'): CreateInput {
     action: 'deploy',
     title: 'Deploy website',
     description: 'Deploy revision abc',
-    details: [{ label: 'Environment', value: 'production' }],
+    details: [
+      { label: 'Environment', value: 'production' },
+    ],
     expiresInSeconds: 900,
     metadata: { trace: 'local' },
   };
 }
-const routes = () => new Map([['primary', { chatId: '-100', approverIds: new Set(['7']) }]]);
+function routes() {
+  return new Map([
+    [
+      'primary',
+      {
+        chatId: '-100',
+        approverIds: new Set(['7']),
+      },
+    ],
+  ]);
+}
 
 class FakeTelegram implements TelegramTransport {
   sent: DeliveryJob[] = [];
@@ -100,7 +112,10 @@ function callback(job: DeliveryJob, user = 7, chat = -100, message = 101, decisi
       id: 'callback',
       data: `${decision}:${job.callbackRef}`,
       from: { id: user },
-      message: { message_id: message, chat: { id: chat } },
+      message: {
+        message_id: message,
+        chat: { id: chat },
+      },
     },
   };
 }
@@ -110,10 +125,16 @@ test('creation is durable, idempotent, immutable and conflict aware', () => {
   const first = core.create('primary', input());
   assert.equal(first.created, true);
   assert.equal(
-    core.create('primary', { ...input(), metadata: { trace: 'local' } }).request.id,
+    core.create('primary', {
+      ...input(),
+      metadata: { trace: 'local' },
+    }).request.id,
     first.request.id,
   );
-  assert.throws(() => core.create('primary', { ...input(), title: 'Changed' }), {
+  assert.throws(() => core.create('primary', {
+    ...input(),
+    title: 'Changed',
+  }), {
     code: 'idempotency_conflict',
   });
   assert.equal(first.request.deliveryStatus, 'pending');
@@ -181,8 +202,20 @@ test('each client delivers to its own chat and only its approvers can decide', a
     core,
     transport,
     new Map([
-      ['alpha', { chatId: '-100', approverIds: new Set(['7']) }],
-      ['beta', { chatId: '-200', approverIds: new Set(['8']) }],
+      [
+        'alpha',
+        {
+          chatId: '-100',
+          approverIds: new Set(['7']),
+        },
+      ],
+      [
+        'beta',
+        {
+          chatId: '-200',
+          approverIds: new Set(['8']),
+        },
+      ],
     ]),
   );
   const alpha = core.create('alpha', input('alpha:one')).request;
@@ -215,7 +248,15 @@ test('a changed destination requeues pending delivery and invalidates old button
   const original = new TelegramGateway(
     core,
     originalTransport,
-    new Map([['primary', { chatId: '-100', approverIds: new Set(['7']) }]]),
+    new Map([
+      [
+        'primary',
+        {
+          chatId: '-100',
+          approverIds: new Set(['7']),
+        },
+      ],
+    ]),
   );
   const request = core.create('primary', input()).request;
   await original.deliverDue();
@@ -229,7 +270,15 @@ test('a changed destination requeues pending delivery and invalidates old button
   const moved = new TelegramGateway(
     restarted,
     movedTransport,
-    new Map([['primary', { chatId: '-200', approverIds: new Set(['8']) }]]),
+    new Map([
+      [
+        'primary',
+        {
+          chatId: '-200',
+          approverIds: new Set(['8']),
+        },
+      ],
+    ]),
   );
   try {
     await moved.start();
@@ -271,7 +320,15 @@ test('changing only approvers revokes old users without redelivering pending mes
   const gateway = new TelegramGateway(
     core,
     after,
-    new Map([['primary', { chatId: '-100', approverIds: new Set(['8']) }]]),
+    new Map([
+      [
+        'primary',
+        {
+          chatId: '-100',
+          approverIds: new Set(['8']),
+        },
+      ],
+    ]),
   );
   try {
     await gateway.start();
@@ -465,7 +522,9 @@ test('Telegram preflight refuses an existing webhook and poller conflict', async
     methods.push(method);
     return Response.json({
       ok: true,
-      result: method === 'getWebhookInfo' ? { url: 'https://existing.example/callback' } : {},
+      result: method === 'getWebhookInfo'
+        ? { url: 'https://existing.example/callback' }
+        : {},
     });
   };
   await assert.rejects(
@@ -477,7 +536,12 @@ test('Telegram preflight refuses an existing webhook and poller conflict', async
     const method = String(url).split('/').at(-1)!;
     return method === 'getUpdates'
       ? Response.json({ ok: false }, { status: 409 })
-      : Response.json({ ok: true, result: method === 'getWebhookInfo' ? { url: '' } : {} });
+      : Response.json({
+          ok: true,
+          result: method === 'getWebhookInfo'
+            ? { url: '' }
+            : {},
+        });
   };
   await assert.rejects(
     new HttpTelegramTransport('testtoken', conflictFetch).check(new Set(['-100'])),
@@ -501,7 +565,12 @@ test('Telegram text is escaped and metadata is not displayed', () => {
 
 test('HTTP auth, validation, and concurrent claims', async () => {
   const { core } = setup();
-  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
+  const app = createHttpServer(core, new Map([
+    [
+      'primary',
+      'a'.repeat(32),
+    ],
+  ]), () => true);
   const headers = { authorization: `Bearer ${'a'.repeat(32)}` };
   assert.equal((await app.inject({ method: 'GET', url: '/v1/requests/test' })).statusCode, 401);
   assert.equal(
@@ -510,7 +579,10 @@ test('HTTP auth, validation, and concurrent claims', async () => {
         method: 'POST',
         url: '/v1/requests',
         headers,
-        payload: { ...input(), expiresInSeconds: 1 },
+        payload: {
+          ...input(),
+          expiresInSeconds: 1,
+        },
       })
     ).json().error.code,
     'invalid_input',
@@ -524,7 +596,12 @@ test('HTTP auth, validation, and concurrent claims', async () => {
   assert.equal(created.statusCode, 201);
   const id = created.json().id as string;
   assert.equal(
-    (await app.inject({ method: 'POST', url: '/v1/requests', headers, payload: input() }))
+    (await app.inject({
+      method: 'POST',
+      url: '/v1/requests',
+      headers,
+      payload: input(),
+    }))
       .statusCode,
     200,
   );
@@ -533,8 +610,18 @@ test('HTTP auth, validation, and concurrent claims', async () => {
   await gateway.deliverDue();
   await gateway.process(callback(fake.sent[0]!));
   const claims = await Promise.all([
-    app.inject({ method: 'POST', url: `/v1/requests/${id}/claim`, headers, payload: {} }),
-    app.inject({ method: 'POST', url: `/v1/requests/${id}/claim`, headers, payload: {} }),
+    app.inject({
+      method: 'POST',
+      url: `/v1/requests/${id}/claim`,
+      headers,
+      payload: {},
+    }),
+    app.inject({
+      method: 'POST',
+      url: `/v1/requests/${id}/claim`,
+      headers,
+      payload: {},
+    }),
   ]);
   assert.deepEqual(claims.map(x => x.statusCode).sort(), [200, 409]);
   assert.equal(
@@ -558,12 +645,22 @@ test('HTTP auth, validation, and concurrent claims', async () => {
 test('readiness rejects new requests while preserving read access', async () => {
   const { core } = setup();
   const request = core.create('primary', input()).request;
-  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => false);
+  const app = createHttpServer(core, new Map([
+    [
+      'primary',
+      'a'.repeat(32),
+    ],
+  ]), () => false);
   const headers = { authorization: `Bearer ${'a'.repeat(32)}` };
   assert.equal((await app.inject({ method: 'GET', url: '/ready' })).statusCode, 503);
   assert.equal(
     (
-      await app.inject({ method: 'POST', url: '/v1/requests', headers, payload: input('another') })
+      await app.inject({
+        method: 'POST',
+        url: '/v1/requests',
+        headers,
+        payload: input('another'),
+      })
     ).json().error.code,
     'not_ready',
   );
@@ -576,14 +673,23 @@ test('readiness rejects new requests while preserving read access', async () => 
 
 test('SDK waits for decision, distinguishes timeout from expiry, and honors AbortSignal', async () => {
   const { core, advance } = setup();
-  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
+  const app = createHttpServer(core, new Map([
+    [
+      'primary',
+      'a'.repeat(32),
+    ],
+  ]), () => true);
   const fetcher: typeof fetch = async (url, init) => {
     const u = new URL(String(url));
     const injected = await app.inject({
       method: (init?.method ?? 'GET') as 'GET' | 'POST',
       url: u.pathname,
       headers: init?.headers as Record<string, string>,
-      ...(init?.body ? { payload: String(init.body) } : {}),
+      ...(init?.body
+        ? {
+            payload: String(init.body),
+          }
+        : {}),
     });
     return new Response(injected.body, {
       status: injected.statusCode,

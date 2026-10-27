@@ -21,11 +21,15 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 
 const requestId = computed(() => {
   const id = route.params.id;
-  return typeof id === 'string' ? id : '';
+  return typeof id === 'string'
+    ? id
+    : '';
 });
 const metadataText = computed(() => JSON.stringify(request.value?.metadata ?? {}, null, 2));
 const canCancel = computed(() =>
-  request.value ? shouldOfferCancel(request.value.status, session.state.cancelDenied) : false,
+  request.value
+    ? shouldOfferCancel(request.value.status, session.state.cancelDenied)
+    : false,
 );
 
 async function load(): Promise<void> {
@@ -59,7 +63,10 @@ async function moreEvents(): Promise<void> {
     limit: 50,
     cursor: eventCursor.value,
   }, signal);
-  events.value = [...events.value, ...page.items];
+  events.value = [
+    ...events.value,
+    ...page.items,
+  ];
   eventCursor.value = page.nextCursor;
 }
 

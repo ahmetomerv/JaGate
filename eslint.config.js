@@ -32,14 +32,24 @@ export default antfu(
     },
   },
   {
-    files: ['src/main.ts', 'examples/**/*.ts', 'playground/**/*.ts', 'playground/**/*.vue'],
+    files: [
+      'src/main.ts',
+      'examples/**/*.ts',
+      'playground/**/*.ts',
+      'playground/**/*.vue',
+    ],
     rules: {
       'no-console': 'off',
       'antfu/no-top-level-await': 'off',
     },
   },
   {
-    files: ['test/**/*.ts', 'playground/**/*.ts', 'playground/**/*.vue', 'console/**/*.vue'],
+    files: [
+      'test/**/*.ts',
+      'playground/**/*.ts',
+      'playground/**/*.vue',
+      'console/**/*.vue',
+    ],
     rules: {
       'ts/explicit-function-return-type': 'off',
     },

@@ -32,7 +32,9 @@ const request = await client.createRequest({
   action: 'write-local-file',
   title: 'Write a local example file',
   description: `Write one temporary text file for ${revision}`,
-  details: [{ label: 'Revision', value: revision }],
+  details: [
+    { label: 'Revision', value: revision }
+  ],
   expiresInSeconds: 900,
 });
 
@@ -141,7 +143,12 @@ const admin = new ApprovalClient({
 const expiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
 const worker = await admin.createClientKey({
   label: 'Deployment worker',
-  scopes: ['requests:create', 'requests:read', 'requests:claim', 'requests:result'],
+  scopes: [
+    'requests:create',
+    'requests:read',
+    'requests:claim',
+    'requests:result'
+  ],
   expiresAt,
 });
 // Save worker.key securely now; listClientKeys only returns its ID and metadata.

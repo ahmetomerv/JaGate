@@ -104,7 +104,9 @@ export class GatewayCore {
         clientId,
         type,
         this.iso(),
-        actorKeyId === null ? 'bootstrap' : 'issued_key',
+        actorKeyId === null
+          ? 'bootstrap'
+          : 'issued_key',
         actorKeyId,
         requestId,
         subjectKeyId,
@@ -146,7 +148,9 @@ export class GatewayCore {
         requestId: row.request_id,
         subjectKeyId: row.subject_key_id,
       })),
-      nextCursor: rows.length > options.limit ? String(page.at(-1)!.id) : null,
+      nextCursor: rows.length > options.limit
+        ? String(page.at(-1)!.id)
+        : null,
     };
   }
 
@@ -319,7 +323,10 @@ export class GatewayCore {
           );
         }
         this.expire();
-        return { request: this.view(this.row(existing.id)!), created: false };
+        return {
+          request: this.view(this.row(existing.id)!),
+          created: false,
+        };
       }
       const id = randomUUID();
       const createdAt = this.iso();
@@ -351,7 +358,10 @@ export class GatewayCore {
         );
       this.appendEvent(id, 'request.created', createdAt);
       this.appendAudit(clientId, 'request.created', actorKeyId, id);
-      return { request: this.view(this.row(id)!), created: true };
+      return {
+        request: this.view(this.row(id)!),
+        created: true,
+      };
     })();
   }
 
@@ -400,7 +410,12 @@ export class GatewayCore {
       actorId: row.actor_id,
       attempt: row.attempt,
     }));
-    return { items, nextCursor: rows.length > limit ? String(page.at(-1)!.sequence) : null };
+    return {
+      items,
+      nextCursor: rows.length > limit
+        ? String(page.at(-1)!.sequence)
+        : null,
+    };
   }
 
   list(
@@ -535,7 +550,11 @@ export class GatewayCore {
       }
       this.appendEvent(id, 'execution.claimed', now);
       this.appendAudit(clientId, 'execution.claimed', actorKeyId, id);
-      return { claimId, claimToken, request: this.get(clientId, id) };
+      return {
+        claimId,
+        claimToken,
+        request: this.get(clientId, id),
+      };
     })();
   }
 

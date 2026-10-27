@@ -33,7 +33,9 @@ export function bundledConsoleRoot(moduleUrl: string = import.meta.url): string 
   if (!dirname(parent).endsWith(`${sep}dist`))
     return undefined;
   const root = join(parent, '..', 'console');
-  return existsSync(join(root, 'index.html')) ? root : undefined;
+  return existsSync(join(root, 'index.html'))
+    ? root
+    : undefined;
 }
 
 export function registerConsole(app: FastifyInstance, root: string): void {
@@ -69,6 +71,8 @@ export function registerConsole(app: FastifyInstance, root: string): void {
       && !path.includes('.');
     if (document)
       return reply.type('text/html; charset=utf-8').sendFile('index.html', resolved);
-    return reply.code(404).send({ error: { code: 'not_found', message: 'not found' } });
+    return reply.code(404).send({
+      error: { code: 'not_found', message: 'not found' },
+    });
   });
 }

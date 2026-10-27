@@ -28,7 +28,12 @@ export const consoleApiMethodNames = [
   'listAuditEvents',
 ] as const;
 
-const hiddenApiMethods = ['createRequest', 'claim', 'reportResult', 'waitForDecision'] as const;
+const hiddenApiMethods = [
+  'createRequest',
+  'claim',
+  'reportResult',
+  'waitForDecision',
+] as const;
 
 export interface ConsoleApi {
   listRequests: (query?: ListRequestsQuery, signal?: AbortSignal) => Promise<ListRequestsPage>;
@@ -59,7 +64,9 @@ export function createConsoleApi(options: {
       return await run(new ApprovalClient({
         baseUrl: options.baseUrl,
         apiKey: options.getKey(),
-        ...(options.fetch ? { fetch: options.fetch } : {}),
+        ...(options.fetch
+          ? { fetch: options.fetch }
+          : {}),
       }));
     }
     catch (error) {

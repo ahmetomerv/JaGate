@@ -20,7 +20,9 @@ const app = createHttpServer(
   core,
   config.clientKeys,
   () => telegram.isReady(),
-  consoleRoot ? { consoleRoot } : {},
+  consoleRoot
+    ? { consoleRoot }
+    : {},
 );
 
 try {
@@ -31,7 +33,9 @@ try {
     console.info('Operator console is available on this server');
 }
 catch (error) {
-  console.error(error instanceof Error ? error.message : 'Startup failed');
+  console.error(error instanceof Error
+    ? error.message
+    : 'Startup failed');
   await telegram.stop();
   db.close();
   process.exitCode = 1;

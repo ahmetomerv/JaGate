@@ -26,9 +26,16 @@ async function load(append: boolean): Promise<void> {
   try {
     const page = await api.listClientKeys({
       limit: 20,
-      ...(append && cursor.value ? { cursor: cursor.value } : {}),
+      ...(append && cursor.value
+        ? { cursor: cursor.value }
+        : {}),
     }, signal);
-    keys.value = append ? [...keys.value, ...page.items] : page.items;
+    keys.value = append
+      ? [
+          ...keys.value,
+          ...page.items,
+        ]
+      : page.items;
     cursor.value = page.nextCursor;
     const clientId = page.items[0]?.clientId;
     if (clientId)
@@ -65,7 +72,9 @@ async function issue(): Promise<void> {
       label: trimmed,
       scopes: scopes.value.filter((scope): scope is typeof consoleKeyScopes[number] =>
         (consoleKeyScopes as readonly string[]).includes(scope)),
-      ...(expires ? { expiresAt: expires } : {}),
+      ...(expires
+        ? { expiresAt: expires }
+        : {}),
     }, signal);
     session.holdSecret(issued.key);
     copied.value = false;
