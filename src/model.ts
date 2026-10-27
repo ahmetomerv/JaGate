@@ -14,7 +14,10 @@ function text(max: number): z.ZodType<string> {
       'control characters are not allowed',
     );
 }
-const detailSchema = z.object({ label: text(40), value: text(160) }).strict();
+const detailSchema = z.object({
+  label: text(40),
+  value: text(160),
+}).strict();
 export type JsonValue
   = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 const jsonValue: z.ZodType<JsonValue> = z.lazy(() =>
@@ -53,7 +56,12 @@ export const createSchema = z
   })
   .refine(
     v =>
-      [v.title, v.description, v.action, ...v.details.flatMap(d => [d.label, d.value])].reduce(
+      [
+        v.title,
+        v.description,
+        v.action,
+        ...v.details.flatMap(d => [d.label, d.value]),
+      ].reduce(
         (sum, s) =>
           sum
           + s
@@ -64,7 +72,10 @@ export const createSchema = z
             .length,
         0,
       ) <= 3000,
-    { path: ['details'], message: 'display text is too long for Telegram' },
+    {
+      path: ['details'],
+      message: 'display text is too long for Telegram',
+    },
   );
 
 export type CreateInput = z.output<typeof createSchema>;
@@ -180,7 +191,10 @@ function stable(value: unknown): unknown {
     return Object.fromEntries(
       Object.entries(value)
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([k, v]) => [k, stable(v)]),
+        .map(([k, v]) => [
+          k,
+          stable(v),
+        ]),
     );
   }
   return value;

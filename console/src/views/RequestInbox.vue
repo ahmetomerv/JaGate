@@ -23,9 +23,25 @@ const failed = ref<Bucket>({ items: [], cursor: null, loading: false });
 const claimed = ref<Bucket>({ items: [], cursor: null, loading: false });
 const expiring = ref<Bucket>({ items: [], cursor: null, loading: false });
 const all = ref<Bucket>({ items: [], cursor: null, loading: false });
-const statuses = ['pending', 'approved', 'rejected', 'expired', 'cancelled'];
-const deliveries = ['pending', 'retrying', 'delivered', 'failed'];
-const executions = ['unclaimed', 'claimed', 'succeeded', 'failed'];
+const statuses = [
+  'pending',
+  'approved',
+  'rejected',
+  'expired',
+  'cancelled',
+];
+const deliveries = [
+  'pending',
+  'retrying',
+  'delivered',
+  'failed',
+];
+const executions = [
+  'unclaimed',
+  'claimed',
+  'succeeded',
+  'failed',
+];
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 function windowMs(): number {
@@ -49,7 +65,12 @@ async function load(
     bucket.loading = true;
   try {
     const page = await api.listRequests(query, signal);
-    bucket.items = append ? [...bucket.items, ...page.items] : page.items;
+    bucket.items = append
+      ? [
+          ...bucket.items,
+          ...page.items,
+        ]
+      : page.items;
     bucket.cursor = page.nextCursor;
     note(page.items);
     error.value = '';

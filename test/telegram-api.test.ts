@@ -13,7 +13,9 @@ const job: DeliveryJob = {
     action: 'publish',
     title: '<Publish & review>',
     description: 'Publish <draft> after review',
-    details: [{ label: 'Owner & team', value: 'A < B' }],
+    details: [
+      { label: 'Owner & team', value: 'A < B' },
+    ],
     metadata: { privateValue: 'must-not-appear' },
     createdAt: '2026-09-24T12:00:00.000Z',
     expiresAt: '2026-09-24T12:15:00.000Z',
@@ -83,7 +85,9 @@ test('Telegram adapter sends escaped content with opaque callbacks and removes b
   const markup = sent.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> };
   assert.deepEqual(
     markup.inline_keyboard.map(row => row.map(button => button.callback_data)),
-    [['a:AbCdEf0123456789', 'r:AbCdEf0123456789']],
+    [
+      ['a:AbCdEf0123456789', 'r:AbCdEf0123456789'],
+    ],
   );
   assert.doesNotMatch(JSON.stringify(markup), /Publish|draft|privateValue/);
   assert.deepEqual(calls[6]?.body.reply_markup, { inline_keyboard: [] });
@@ -136,7 +140,12 @@ test('Telegram preflight gives a specific error when the configured chat is inac
       checked.push(method);
       return Response.json({ ok: false }, { status: 400 });
     }
-    return Response.json({ ok: true, result: method === 'getWebhookInfo' ? { url: '' } : {} });
+    return Response.json({
+      ok: true,
+      result: method === 'getWebhookInfo'
+        ? { url: '' }
+        : {},
+    });
   };
   await assert.rejects(
     new HttpTelegramTransport('test-token', fetcher).check(new Set(['-100'])),
@@ -155,7 +164,12 @@ test('Telegram preflight checks every distinct destination before polling', asyn
       if (chatId === '-200')
         return Response.json({ ok: false }, { status: 400 });
     }
-    return Response.json({ ok: true, result: method === 'getWebhookInfo' ? { url: '' } : [] });
+    return Response.json({
+      ok: true,
+      result: method === 'getWebhookInfo'
+        ? { url: '' }
+        : [],
+    });
   };
   await assert.rejects(
     new HttpTelegramTransport('test-token', fetcher).check(new Set(['-100', '-200'])),

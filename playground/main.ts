@@ -16,7 +16,9 @@ const app = createPlayground({
 await app.listen({ host: '127.0.0.1', port: 3081 });
 let vite: Awaited<ReturnType<typeof createServer>>;
 try {
-  vite = await createServer({ configFile: resolve('playground/vite.config.ts') });
+  vite = await createServer({
+    configFile: resolve('playground/vite.config.ts'),
+  });
   await vite.listen();
 }
 catch (error) {

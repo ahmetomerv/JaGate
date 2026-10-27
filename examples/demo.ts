@@ -15,7 +15,12 @@ const request = await client.createRequest({
   action: 'write-local-demo-file',
   title: 'Create a harmless local demo file',
   description: 'Write one text file to the operating system temporary directory after approval.',
-  details: [{ label: 'Directory', value: tmpdir() }],
+  details: [
+    {
+      label: 'Directory',
+      value: tmpdir(),
+    },
+  ],
   expiresInSeconds: 600,
   metadata: {},
 });

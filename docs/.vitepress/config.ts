@@ -8,10 +8,18 @@ export default defineConfig({
   title: 'JaGate',
   description: 'A self-hosted human approval gateway for applications',
   base,
-  vite: { publicDir: fileURLToPath(new URL('../../assets/', import.meta.url)) },
+  vite: {
+    publicDir: fileURLToPath(new URL('../../assets/', import.meta.url)),
+  },
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}logo.svg` }],
-    ['meta', { name: 'theme-color', content: '#142C45' }],
+    [
+      'link',
+      { rel: 'icon', type: 'image/svg+xml', href: `${base}logo.svg` },
+    ],
+    [
+      'meta',
+      { name: 'theme-color', content: '#142C45' },
+    ],
   ],
   lastUpdated: true,
   themeConfig: {
@@ -46,7 +54,9 @@ export default defineConfig({
         ],
       },
     ],
-    socialLinks: [{ icon: 'github', link: 'https://github.com/ahmetomerv/JaGate' }],
+    socialLinks: [
+      { icon: 'github', link: 'https://github.com/ahmetomerv/JaGate' },
+    ],
     editLink: { pattern: 'https://github.com/ahmetomerv/JaGate/edit/main/docs/:path' },
     footer: {
       message: 'MIT licensed. JaGate coordinates approval; your application performs the action.',

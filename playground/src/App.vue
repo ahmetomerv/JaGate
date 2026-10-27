@@ -94,7 +94,9 @@ const defaultRequest: ExampleRequest = {
   action: 'test-action',
   title: 'Test a local approval',
   description: 'A harmless request made from the JaGate playground.',
-  details: [{ label: 'Environment', value: 'local' }],
+  details: [
+    { label: 'Environment', value: 'local' },
+  ],
   metadata: { source: 'playground' },
   expiresInSeconds: 900,
 };
@@ -183,18 +185,27 @@ const clients = computed(() =>
     : (bootstrap.value?.liveClients ?? []),
 );
 const simulatedExample = computed(() =>
-  mode.value === 'simulated' ? bootstrap.value?.simulatedExamples[clientId.value] : undefined,
+  mode.value === 'simulated'
+    ? bootstrap.value?.simulatedExamples[clientId.value]
+    : undefined,
 );
 const selected = computed(() =>
-  [...history.value, ...(listPage.value?.items ?? [])].find(item => item.id === requestId.value),
+  [
+    ...history.value,
+    ...(listPage.value?.items ?? []),
+  ].find(item => item.id === requestId.value),
 );
 const visibleEntry = computed(() =>
-  activeEntry.value === null ? undefined : entries.value[activeEntry.value],
+  activeEntry.value === null
+    ? undefined
+    : entries.value[activeEntry.value],
 );
 const clientOptions = computed(() =>
   clients.value.map(id => ({
     value: id,
-    label: mode.value === 'simulated' ? (bootstrap.value?.simulatedExamples[id]?.label ?? id) : id,
+    label: mode.value === 'simulated'
+      ? (bootstrap.value?.simulatedExamples[id]?.label ?? id)
+      : id,
   })),
 );
 const simulatedNowLabel = computed(() =>
@@ -213,27 +224,49 @@ const phase = computed(() => {
   return 'record';
 });
 const listFilters = computed(() => ({
-  ...(listStatus.value !== 'any' ? { status: listStatus.value } : {}),
-  ...(listDeliveryStatus.value !== 'any' ? { deliveryStatus: listDeliveryStatus.value } : {}),
-  ...(listExecutionStatus.value !== 'any' ? { executionStatus: listExecutionStatus.value } : {}),
-  ...(listClaimedBefore.value ? { claimedBefore: listClaimedBefore.value } : {}),
-  ...(listExpiresBefore.value ? { expiresBefore: listExpiresBefore.value } : {}),
+  ...(listStatus.value !== 'any'
+    ? { status: listStatus.value }
+    : {}),
+  ...(listDeliveryStatus.value !== 'any'
+    ? { deliveryStatus: listDeliveryStatus.value }
+    : {}),
+  ...(listExecutionStatus.value !== 'any'
+    ? { executionStatus: listExecutionStatus.value }
+    : {}),
+  ...(listClaimedBefore.value
+    ? { claimedBefore: listClaimedBefore.value }
+    : {}),
+  ...(listExpiresBefore.value
+    ? { expiresBefore: listExpiresBefore.value }
+    : {}),
   limit: Number(listLimit.value),
-  ...(listCursor.value ? { cursor: listCursor.value } : {}),
+  ...(listCursor.value
+    ? { cursor: listCursor.value }
+    : {}),
 }));
 const eventFilters = computed(() => ({
   limit: Number(eventLimit.value),
-  ...(eventCursor.value ? { cursor: eventCursor.value } : {}),
+  ...(eventCursor.value
+    ? { cursor: eventCursor.value }
+    : {}),
 }));
 const keyFilters = computed(() => ({
   limit: Number(keyLimit.value),
-  ...(keyCursor.value ? { cursor: keyCursor.value } : {}),
+  ...(keyCursor.value
+    ? { cursor: keyCursor.value }
+    : {}),
 }));
 const auditFilters = computed(() => ({
   limit: Number(auditLimit.value),
-  ...(auditRequestId.value ? { requestId: auditRequestId.value } : {}),
-  ...(auditKeyId.value ? { keyId: auditKeyId.value } : {}),
-  ...(auditCursor.value ? { cursor: auditCursor.value } : {}),
+  ...(auditRequestId.value
+    ? { requestId: auditRequestId.value }
+    : {}),
+  ...(auditKeyId.value
+    ? { keyId: auditKeyId.value }
+    : {}),
+  ...(auditCursor.value
+    ? { cursor: auditCursor.value }
+    : {}),
 }));
 const requestPreview = computed(() => ({
   idempotencyKey: idempotencyKey.value,
@@ -294,7 +327,13 @@ watch([clientId, mode, keyLimit], () => {
   keyCursor.value = '';
   keyCursorStack.value = [];
 });
-watch([clientId, mode, auditLimit, auditRequestId, auditKeyId], () => {
+watch([
+  clientId,
+  mode,
+  auditLimit,
+  auditRequestId,
+  auditKeyId,
+], () => {
   auditPage.value = null;
   auditCursor.value = '';
   auditCursorStack.value = [];
@@ -312,7 +351,10 @@ function applyExample(example: ExampleRequest) {
 function cleanDetails(): Detail[] {
   return detailRows.value
     .filter(row => row.label.trim() || row.value.trim())
-    .map(row => ({ label: row.label.trim(), value: row.value.trim() }));
+    .map(row => ({
+      label: row.label.trim(),
+      value: row.value.trim(),
+    }));
 }
 function addDetail() {
   if (detailRows.value.length >= 10)
@@ -346,14 +388,28 @@ function applyAttention(kind: 'all' | 'delivery' | 'claimed' | 'expiry') {
     return;
   }
   error.value = '';
-  const now = Date.now() + (mode.value === 'simulated' ? simulatedClockOffset.value : 0);
+  const now = Date.now() + (mode.value === 'simulated'
+    ? simulatedClockOffset.value
+    : 0);
   listStatus.value
-    = kind === 'delivery' || kind === 'expiry' ? 'pending' : kind === 'claimed' ? 'approved' : 'any';
-  listDeliveryStatus.value = kind === 'delivery' ? 'failed' : 'any';
-  listExecutionStatus.value = kind === 'claimed' ? 'claimed' : 'any';
+    = kind === 'delivery' || kind === 'expiry'
+      ? 'pending'
+      : kind === 'claimed'
+        ? 'approved'
+        : 'any';
+  listDeliveryStatus.value = kind === 'delivery'
+    ? 'failed'
+    : 'any';
+  listExecutionStatus.value = kind === 'claimed'
+    ? 'claimed'
+    : 'any';
   listClaimedBefore.value
-    = kind === 'claimed' ? new Date(now - minutes * 60_000).toISOString() : '';
-  listExpiresBefore.value = kind === 'expiry' ? new Date(now + minutes * 60_000).toISOString() : '';
+    = kind === 'claimed'
+      ? new Date(now - minutes * 60_000).toISOString()
+      : '';
+  listExpiresBefore.value = kind === 'expiry'
+    ? new Date(now + minutes * 60_000).toISOString()
+    : '';
   listCursor.value = '';
   listCursorStack.value = [];
   void execute('list');
@@ -365,7 +421,9 @@ async function showRequests() {
 }
 function setKeyExpiryOneHour() {
   keyExpiresAt.value = new Date(
-    Date.now() + (mode.value === 'simulated' ? simulatedClockOffset.value : 0) + 3_600_000,
+    Date.now() + (mode.value === 'simulated'
+      ? simulatedClockOffset.value
+      : 0) + 3_600_000,
   ).toISOString();
 }
 function newApproval() {
@@ -382,7 +440,11 @@ function newApproval() {
 }
 function stageClass(name: 'decide' | 'act' | 'record') {
   const order = ['decide', 'act', 'record'];
-  const current = phase.value === 'decide' ? 'decide' : phase.value === 'act' ? 'act' : 'record';
+  const current = phase.value === 'decide'
+    ? 'decide'
+    : phase.value === 'act'
+      ? 'act'
+      : 'record';
   const place = order.indexOf(name);
   const here = order.indexOf(current);
   if (place < here)
@@ -392,7 +454,10 @@ function stageClass(name: 'decide' | 'act' | 'record') {
   return 'upcoming';
 }
 function remember(item: RequestView) {
-  history.value = [item, ...history.value.filter(existing => existing.id !== item.id)].slice(
+  history.value = [
+    item,
+    ...history.value.filter(existing => existing.id !== item.id),
+  ].slice(
     0,
     100,
   );
@@ -415,24 +480,39 @@ function gatewayMessage(body: unknown, status: number) {
 }
 async function api(path: string, body?: unknown) {
   const response = await fetch(path, {
-    method: body === undefined ? 'GET' : 'POST',
+    method: body === undefined
+      ? 'GET'
+      : 'POST',
     headers: {
       'x-playground-token': bootstrap.value!.token,
-      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      ...(body === undefined
+        ? {}
+        : { 'content-type': 'application/json' }),
     },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(body === undefined
+      ? {}
+      : {
+          body: JSON.stringify(body),
+        }),
   });
   const data = await response.json();
   if (!response.ok) {
     throw new Error(
-      typeof data.error === 'string' ? data.error : `Playground error ${response.status}`,
+      typeof data.error === 'string'
+        ? data.error
+        : `Playground error ${response.status}`,
     );
   }
   return data;
 }
 function record(label: string, status: number, body: unknown, show = true) {
   entries.value = [
-    { time: new Date().toLocaleTimeString(), label, status, body },
+    {
+      time: new Date().toLocaleTimeString(),
+      label,
+      status,
+      body,
+    },
     ...entries.value,
   ].slice(0, 20);
   if (show) {
@@ -441,7 +521,9 @@ function record(label: string, status: number, body: unknown, show = true) {
     copied.value = false;
   }
   else if (activeEntry.value !== null) {
-    activeEntry.value = activeEntry.value + 1 < entries.value.length ? activeEntry.value + 1 : null;
+    activeEntry.value = activeEntry.value + 1 < entries.value.length
+      ? activeEntry.value + 1
+      : null;
   }
 }
 async function copyResponse() {
@@ -468,8 +550,11 @@ async function refreshHistory() {
       auth: 'valid',
       filters: { limit: 20 },
     })) as { status: number; body: ListPage };
-    if (currentMode === mode.value && currentClient === clientId.value)
-      history.value = response.status === 200 ? response.body.items : [];
+    if (currentMode === mode.value && currentClient === clientId.value) {
+      history.value = response.status === 200
+        ? response.body.items
+        : [];
+    }
   }
   catch {
     if (currentMode === mode.value && currentClient === clientId.value)
@@ -528,7 +613,9 @@ async function execute(
     payload = {
       label: keyLabel.value,
       scopes: keyScopes.value,
-      ...(keyExpiresAt.value ? { expiresAt: keyExpiresAt.value } : {}),
+      ...(keyExpiresAt.value
+        ? { expiresAt: keyExpiresAt.value }
+        : {}),
     };
   }
   const show = options?.show !== false;
@@ -539,21 +626,37 @@ async function execute(
       clientId: sentClient,
       operation: sentOperation,
       auth: auth.value,
-      ...(auth.value === 'scoped' ? { scopedKey: scopedKey.value } : {}),
+      ...(auth.value === 'scoped'
+        ? { scopedKey: scopedKey.value }
+        : {}),
       requestId: requestId.value,
       keyId: keyId.value,
-      ...(sentOperation === 'list' ? { filters: listFilters.value } : {}),
-      ...(sentOperation === 'events' ? { eventPage: eventFilters.value } : {}),
-      ...(sentOperation === 'keyList' ? { keyPage: keyFilters.value } : {}),
+      ...(sentOperation === 'list'
+        ? { filters: listFilters.value }
+        : {}),
+      ...(sentOperation === 'events'
+        ? { eventPage: eventFilters.value }
+        : {}),
+      ...(sentOperation === 'keyList'
+        ? { keyPage: keyFilters.value }
+        : {}),
       payload,
-      ...(sentOperation === 'audit' ? { auditPage: auditFilters.value } : {}),
+      ...(sentOperation === 'audit'
+        ? { auditPage: auditFilters.value }
+        : {}),
     })) as { status: number; body: Record<string, unknown> };
     const current
       = sentMode === mode.value
         && sentClient === clientId.value
-        && (!['get', 'events', 'cancel', 'claim', 'result'].includes(sentOperation)
-          || sentRequestId === requestId.value)
-        && (sentOperation !== 'keyRevoke' || sentKeyId === keyId.value);
+        && (![
+          'get',
+          'events',
+          'cancel',
+          'claim',
+          'result',
+        ].includes(sentOperation)
+        || sentRequestId === requestId.value)
+      && (sentOperation !== 'keyRevoke' || sentKeyId === keyId.value);
     record(
       `${sentOperation.toUpperCase()} · ${sentClient} · ${sentMode}`,
       response.status,
@@ -564,14 +667,26 @@ async function execute(
       return null;
     if (response.status >= 400)
       error.value = gatewayMessage(response.body, response.status);
-    if (sentOperation === 'list')
-      listPage.value = response.status === 200 ? (response.body as unknown as ListPage) : null;
-    if (sentOperation === 'events')
-      eventPage.value = response.status === 200 ? (response.body as unknown as EventPage) : null;
-    if (sentOperation === 'keyList')
-      keyPage.value = response.status === 200 ? (response.body as unknown as KeyPage) : null;
-    if (sentOperation === 'audit')
-      auditPage.value = response.status === 200 ? (response.body as unknown as AuditPage) : null;
+    if (sentOperation === 'list') {
+      listPage.value = response.status === 200
+        ? (response.body as unknown as ListPage)
+        : null;
+    }
+    if (sentOperation === 'events') {
+      eventPage.value = response.status === 200
+        ? (response.body as unknown as EventPage)
+        : null;
+    }
+    if (sentOperation === 'keyList') {
+      keyPage.value = response.status === 200
+        ? (response.body as unknown as KeyPage)
+        : null;
+    }
+    if (sentOperation === 'audit') {
+      auditPage.value = response.status === 200
+        ? (response.body as unknown as AuditPage)
+        : null;
+    }
     if (sentOperation === 'keyCreate' && response.status === 201) {
       keyId.value = String(response.body.id);
       scopedKey.value = String(response.body.key);
@@ -582,7 +697,9 @@ async function execute(
       keyPage.value = null;
       auditPage.value = null;
     }
-    const viewBody = sentOperation === 'claim' ? response.body.request : response.body;
+    const viewBody = sentOperation === 'claim'
+      ? response.body.request
+      : response.body;
     const armedDelivery
       = failNextDelivery.value
         && sentMode === 'simulated'
@@ -591,7 +708,13 @@ async function execute(
     if (armedDelivery)
       failNextDelivery.value = false;
     if (
-      ['create', 'get', 'cancel', 'claim', 'result'].includes(sentOperation)
+      [
+        'create',
+        'get',
+        'cancel',
+        'claim',
+        'result',
+      ].includes(sentOperation)
       && viewBody
       && typeof viewBody === 'object'
       && 'id' in viewBody
@@ -622,13 +745,23 @@ async function execute(
     }
     if (sentOperation === 'claim' && typeof response.body.claimToken === 'string')
       claimToken.value = response.body.claimToken;
-    if (['create', 'get', 'cancel', 'claim', 'result'].includes(sentOperation))
+    if ([
+      'create',
+      'get',
+      'cancel',
+      'claim',
+      'result',
+    ].includes(sentOperation)) {
       await refreshHistory();
+    }
     return { status: response.status, body: response.body };
   }
   catch (cause) {
-    if (sentMode === mode.value && sentClient === clientId.value)
-      error.value = cause instanceof Error ? cause.message : 'Request failed';
+    if (sentMode === mode.value && sentClient === clientId.value) {
+      error.value = cause instanceof Error
+        ? cause.message
+        : 'Request failed';
+    }
     return null;
   }
   finally {
@@ -716,7 +849,9 @@ async function report(status: 'succeeded' | 'failed') {
       clientId: sentClient,
       operation: 'result',
       auth: auth.value,
-      ...(auth.value === 'scoped' ? { scopedKey: scopedKey.value } : {}),
+      ...(auth.value === 'scoped'
+        ? { scopedKey: scopedKey.value }
+        : {}),
       requestId: sentRequestId,
       payload: { claimToken: claimToken.value, status, summary: resultSummary.value },
     })) as { status: number; body: Record<string, unknown> };
@@ -739,7 +874,9 @@ async function report(status: 'succeeded' | 'failed') {
       && sentClient === clientId.value
       && sentRequestId === requestId.value
     ) {
-      error.value = cause instanceof Error ? cause.message : 'Request failed';
+      error.value = cause instanceof Error
+        ? cause.message
+        : 'Request failed';
     }
   }
   finally {
@@ -888,7 +1025,9 @@ async function decide(decision: 'approve' | 'reject') {
       && sentClient === clientId.value
       && sentRequestId === requestId.value
     ) {
-      error.value = cause instanceof Error ? cause.message : 'Decision failed';
+      error.value = cause instanceof Error
+        ? cause.message
+        : 'Decision failed';
     }
   }
   finally {
@@ -905,7 +1044,9 @@ async function advanceTime() {
   const openId = requestId.value;
   try {
     busy.value = true;
-    const response = await api('/api/advance-time', { seconds: Number(advanceSeconds.value) });
+    const response = await api('/api/advance-time', {
+      seconds: Number(advanceSeconds.value),
+    });
     if (typeof (response as { now?: unknown }).now === 'string')
       simulatedClockOffset.value = Date.parse((response as { now: string }).now) - Date.now();
     const current = sentMode === mode.value && sentClient === clientId.value;
@@ -915,8 +1056,11 @@ async function advanceTime() {
     await refreshHistory();
   }
   catch (cause) {
-    if (sentMode === mode.value && sentClient === clientId.value)
-      error.value = cause instanceof Error ? cause.message : 'Clock change failed';
+    if (sentMode === mode.value && sentClient === clientId.value) {
+      error.value = cause instanceof Error
+        ? cause.message
+        : 'Clock change failed';
+    }
   }
   finally {
     busy.value = false;
@@ -934,7 +1078,9 @@ async function armDeliveryFailure() {
     failNextDelivery.value = response.armed;
   }
   catch (cause) {
-    error.value = cause instanceof Error ? cause.message : 'Could not arm the delivery failure';
+    error.value = cause instanceof Error
+      ? cause.message
+      : 'Could not arm the delivery failure';
   }
   finally {
     busy.value = false;
@@ -969,7 +1115,9 @@ function statusClass(status: string) {
 function keyState(item: ClientKeyView) {
   if (item.revokedAt)
     return 'Revoked';
-  const now = Date.now() + (mode.value === 'simulated' ? simulatedClockOffset.value : 0);
+  const now = Date.now() + (mode.value === 'simulated'
+    ? simulatedClockOffset.value
+    : 0);
   if (item.expiresAt && Date.parse(item.expiresAt) <= now)
     return 'Expired';
   return 'Active';
@@ -993,12 +1141,16 @@ onMounted(async () => {
       throw new Error('Could not start the playground');
     bootstrap.value = (await response.json()) as Bootstrap;
     const simulatedNow = Date.parse(bootstrap.value.simulatedNow);
-    simulatedClockOffset.value = Number.isFinite(simulatedNow) ? simulatedNow - Date.now() : 0;
+    simulatedClockOffset.value = Number.isFinite(simulatedNow)
+      ? simulatedNow - Date.now()
+      : 0;
     failNextDelivery.value = bootstrap.value.failNextDelivery === true;
     clientId.value = bootstrap.value.simulatedClients[0] ?? '';
   }
   catch (cause) {
-    error.value = cause instanceof Error ? cause.message : 'Could not start the playground';
+    error.value = cause instanceof Error
+      ? cause.message
+      : 'Could not start the playground';
   }
 });
 onUnmounted(() => {

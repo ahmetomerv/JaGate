@@ -73,10 +73,18 @@ export class ApprovalClient {
       method,
       headers: {
         authorization: `Bearer ${this.options.apiKey}`,
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...(body === undefined
+          ? {}
+          : { 'content-type': 'application/json' }),
       },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      ...(signal ? { signal } : {}),
+      ...(body === undefined
+        ? {}
+        : {
+            body: JSON.stringify(body),
+          }),
+      ...(signal
+        ? { signal }
+        : {}),
     });
     const data = (await response.json()) as T & { error?: { code: string; message: string } };
     if (!response.ok) {
@@ -110,7 +118,9 @@ export class ApprovalClient {
     if (query.cursor)
       params.set('cursor', query.cursor);
     const search = params.toString();
-    return this.call(`/v1/requests${search ? `?${search}` : ''}`, 'GET', undefined, signal);
+    return this.call(`/v1/requests${search
+      ? `?${search}`
+      : ''}`, 'GET', undefined, signal);
   }
 
   getRequest(id: string, signal?: AbortSignal): Promise<RequestView> {
@@ -129,7 +139,9 @@ export class ApprovalClient {
       params.set('cursor', query.cursor);
     const search = params.toString();
     return this.call(
-      `/v1/requests/${encodeURIComponent(id)}/events${search ? `?${search}` : ''}`,
+      `/v1/requests/${encodeURIComponent(id)}/events${search
+        ? `?${search}`
+        : ''}`,
       'GET',
       undefined,
       signal,
@@ -150,7 +162,9 @@ export class ApprovalClient {
     if (query.cursor)
       params.set('cursor', query.cursor);
     const search = params.toString();
-    return this.call(`/v1/client-keys${search ? `?${search}` : ''}`, 'GET', undefined, signal);
+    return this.call(`/v1/client-keys${search
+      ? `?${search}`
+      : ''}`, 'GET', undefined, signal);
   }
 
   listAuditEvents(
@@ -167,7 +181,9 @@ export class ApprovalClient {
     if (query.keyId)
       params.set('keyId', query.keyId);
     const search = params.toString();
-    return this.call(`/v1/audit-events${search ? `?${search}` : ''}`, 'GET', undefined, signal);
+    return this.call(`/v1/audit-events${search
+      ? `?${search}`
+      : ''}`, 'GET', undefined, signal);
   }
 
   revokeClientKey(id: string, signal?: AbortSignal): Promise<ClientKeyView> {

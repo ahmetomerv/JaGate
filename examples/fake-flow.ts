@@ -9,7 +9,9 @@ import { TelegramGateway } from '../src/telegram.js';
 const db = openDatabase(':memory:');
 const core = new GatewayCore(db);
 const key = 'x'.repeat(32);
-const app = createHttpServer(core, new Map([['example', key]]), () => true);
+const app = createHttpServer(core, new Map([
+  ['example', key],
+]), () => true);
 const sent: DeliveryJob[] = [];
 const transport: TelegramTransport = {
   async check() {},
@@ -30,7 +32,15 @@ const transport: TelegramTransport = {
 const telegram = new TelegramGateway(
   core,
   transport,
-  new Map([['example', { chatId: '-100', approverIds: new Set(['7']) }]]),
+  new Map([
+    [
+      'example',
+      {
+        chatId: '-100',
+        approverIds: new Set(['7']),
+      },
+    ],
+  ]),
 );
 const fetcher: typeof fetch = async (url, init) => {
   const path = new URL(String(url)).pathname;
@@ -38,7 +48,11 @@ const fetcher: typeof fetch = async (url, init) => {
     method: (init?.method ?? 'GET') as 'GET' | 'POST',
     url: path,
     headers: init?.headers as Record<string, string>,
-    ...(init?.body ? { payload: String(init.body) } : {}),
+    ...(init?.body
+      ? {
+          payload: String(init.body),
+        }
+      : {}),
   });
   return new Response(result.body, {
     status: result.statusCode,
@@ -72,7 +86,10 @@ try {
       id: 'mock-callback',
       data: `a:${job.callbackRef}`,
       from: { id: 7 },
-      message: { chat: { id: -100 }, message_id: 101 },
+      message: {
+        chat: { id: -100 },
+        message_id: 101,
+      },
     },
   });
   const decision = await client.waitForDecision(request.id, { timeoutMs: 1000 });

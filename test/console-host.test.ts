@@ -51,7 +51,12 @@ test('the built console is served for navigation and refused for hidden files', 
   const dir = mkdtempSync(join(tmpdir(), 'jagate-console-db-'));
   dirs.push(dir);
   const db = openDatabase(join(dir, 'db.sqlite'));
-  const app = createHttpServer(new GatewayCore(db), new Map([['website', 'a'.repeat(32)]]), () => true, {
+  const app = createHttpServer(new GatewayCore(db), new Map([
+    [
+      'website',
+      'a'.repeat(32),
+    ],
+  ]), () => true, {
     consoleRoot: root,
   });
   const page = await app.inject({ method: 'GET', url: '/inbox' });

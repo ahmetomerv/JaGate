@@ -50,12 +50,27 @@ function input(key = 'job:one'): CreateInput {
     action: 'maintenance',
     title: 'Run maintenance',
     description: 'Compact local records',
-    details: [{ label: 'Target', value: 'staging' }],
+    details: [
+      { label: 'Target', value: 'staging' },
+    ],
     expiresInSeconds: 900,
-    metadata: { ticket: 'OPS-1', options: { b: 2, a: 1 } },
+    metadata: {
+      ticket: 'OPS-1',
+      options: { b: 2, a: 1 },
+    },
   });
 }
-const routes = () => new Map([['primary', { chatId: '-100', approverIds: new Set(['7']) }]]);
+function routes() {
+  return new Map([
+    [
+      'primary',
+      {
+        chatId: '-100',
+        approverIds: new Set(['7']),
+      },
+    ],
+  ]);
+}
 
 function mockFetch(app: ReturnType<typeof createHttpServer>): typeof fetch {
   return async (url, init) => {
@@ -65,7 +80,11 @@ function mockFetch(app: ReturnType<typeof createHttpServer>): typeof fetch {
       method: (init?.method ?? 'GET') as 'GET' | 'POST',
       url: path,
       headers: init?.headers as Record<string, string>,
-      ...(init?.body ? { payload: String(init.body) } : {}),
+      ...(init?.body
+        ? {
+            payload: String(init.body),
+          }
+        : {}),
     });
     return new Response(response.body, {
       status: response.statusCode,
@@ -81,7 +100,10 @@ function button(job: DeliveryJob, updateId: number, decision: 'a' | 'r' = 'a'): 
       id: `callback-${updateId}`,
       data: `${decision}:${job.callbackRef}`,
       from: { id: 7 },
-      message: { message_id: 101, chat: { id: -100 } },
+      message: {
+        message_id: 101,
+        chat: { id: -100 },
+      },
     },
   };
 }
@@ -91,20 +113,34 @@ test('configuration binds locally and requires distinct client credentials and n
     CLIENT_KEYS: `primary:${'a'.repeat(32)},secondary:${'b'.repeat(32)}`,
     TELEGRAM_BOT_TOKEN: 'test-token-12345',
     TELEGRAM_ROUTES: JSON.stringify({
-      primary: { chatId: '-100123', approverIds: ['7', '8'] },
-      secondary: { chatId: '-100456', approverIds: ['9'] },
+      primary: {
+        chatId: '-100123',
+        approverIds: ['7', '8'],
+      },
+      secondary: {
+        chatId: '-100456',
+        approverIds: ['9'],
+      },
     }),
   };
   const config = parseConfig(env);
   assert.deepEqual(
     [...config.clientKeys],
     [
-      ['primary', 'a'.repeat(32)],
-      ['secondary', 'b'.repeat(32)],
+      [
+        'primary',
+        'a'.repeat(32),
+      ],
+      [
+        'secondary',
+        'b'.repeat(32),
+      ],
     ],
   );
   assert.equal(config.routes.get('primary')?.chatId, '-100123');
-  assert.deepEqual([...config.routes.get('secondary')!.approverIds], ['9']);
+  assert.deepEqual([
+    ...config.routes.get('secondary')!.approverIds,
+  ], ['9']);
   assert.equal(config.HOST, '127.0.0.1');
   assert.equal(config.PORT, 3080);
   assert.equal(config.DATABASE_PATH, './data/gateway.sqlite');
@@ -118,41 +154,82 @@ test('configuration binds locally and requires distinct client credentials and n
     { CLIENT_KEYS: '' },
     { TELEGRAM_BOT_TOKEN: 'replace-with-dedicated-bot-token' },
     { TELEGRAM_ROUTES: 'not-json' },
-    { TELEGRAM_ROUTES: JSON.stringify({ primary: { chatId: '-100123', approverIds: ['7'] } }) },
     {
       TELEGRAM_ROUTES: JSON.stringify({
-        primary: { chatId: '-100123', approverIds: ['7'] },
-        secondary: { chatId: 'chat-name', approverIds: ['9'] },
+        primary: {
+          chatId: '-100123',
+          approverIds: ['7'],
+        },
       }),
     },
     {
       TELEGRAM_ROUTES: JSON.stringify({
-        primary: { chatId: '-100123', approverIds: ['7', '7'] },
-        secondary: { chatId: '-100456', approverIds: ['9'] },
+        primary: {
+          chatId: '-100123',
+          approverIds: ['7'],
+        },
+        secondary: {
+          chatId: 'chat-name',
+          approverIds: ['9'],
+        },
       }),
     },
     {
       TELEGRAM_ROUTES: JSON.stringify({
-        primary: { chatId: '-100123', approverIds: ['7'] },
-        secondary: { chatId: '-100123', approverIds: ['9'] },
+        primary: {
+          chatId: '-100123',
+          approverIds: ['7', '7'],
+        },
+        secondary: {
+          chatId: '-100456',
+          approverIds: ['9'],
+        },
       }),
     },
     {
       TELEGRAM_ROUTES: JSON.stringify({
-        primary: { chatId: '-0100123', approverIds: ['7'] },
-        secondary: { chatId: '-100456', approverIds: ['9'] },
+        primary: {
+          chatId: '-100123',
+          approverIds: ['7'],
+        },
+        secondary: {
+          chatId: '-100123',
+          approverIds: ['9'],
+        },
       }),
     },
     {
       TELEGRAM_ROUTES: JSON.stringify({
-        primary: { chatId: '-100123', approverIds: ['07'] },
-        secondary: { chatId: '-100456', approverIds: ['9'] },
+        primary: {
+          chatId: '-0100123',
+          approverIds: ['7'],
+        },
+        secondary: {
+          chatId: '-100456',
+          approverIds: ['9'],
+        },
+      }),
+    },
+    {
+      TELEGRAM_ROUTES: JSON.stringify({
+        primary: {
+          chatId: '-100123',
+          approverIds: ['07'],
+        },
+        secondary: {
+          chatId: '-100456',
+          approverIds: ['9'],
+        },
       }),
     },
     { TELEGRAM_CHAT_ID: '-100123' },
     { PORT: '0' },
-  ])
-    assert.throws(() => parseConfig({ ...env, ...invalid }));
+  ]) {
+    assert.throws(() => parseConfig({
+      ...env,
+      ...invalid,
+    }));
+  }
   const single = parseConfig({
     CLIENT_KEYS: `primary:${'a'.repeat(32)}`,
     TELEGRAM_BOT_TOKEN: 'test-token-12345',
@@ -232,13 +309,21 @@ test('migration and canonical idempotency survive restart without changing appro
       .count,
     6,
   );
-  const reordered = { ...original, metadata: { options: { a: 1, b: 2 }, ticket: 'OPS-1' } };
+  const reordered = {
+    ...original,
+    metadata: {
+      options: { a: 1, b: 2 },
+      ticket: 'OPS-1',
+    },
+  };
   assert.equal(restarted.create('primary', reordered).request.id, created.id);
   assert.throws(
     () =>
       restarted.create('primary', {
         ...original,
-        details: [{ label: 'Target', value: 'production' }],
+        details: [
+          { label: 'Target', value: 'production' },
+        ],
       }),
     { code: 'idempotency_conflict' },
   );
@@ -247,24 +332,79 @@ test('migration and canonical idempotency survive restart without changing appro
 
 test('API validates the full request boundary and never echoes rejected values', async () => {
   const { core } = setup();
-  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
+  const app = createHttpServer(core, new Map([
+    [
+      'primary',
+      'a'.repeat(32),
+    ],
+  ]), () => true);
   const headers = { authorization: `Bearer ${'a'.repeat(32)}` };
   const base = input();
   const badBodies: Array<[string, unknown]> = [
-    ['expiry below minimum', { ...base, expiresInSeconds: 59 }],
-    ['expiry above maximum', { ...base, expiresInSeconds: 86401 }],
-    ['uppercase action', { ...base, action: 'Deploy' }],
-    ['invalid idempotency key', { ...base, idempotencyKey: 'bad key' }],
-    ['title too long', { ...base, title: 'x'.repeat(101) }],
-    ['description control character', { ...base, description: 'a\u0000b' }],
+    [
+      'expiry below minimum',
+      { ...base, expiresInSeconds: 59 },
+    ],
+    [
+      'expiry above maximum',
+      { ...base, expiresInSeconds: 86401 },
+    ],
+    [
+      'uppercase action',
+      { ...base, action: 'Deploy' },
+    ],
+    [
+      'invalid idempotency key',
+      { ...base, idempotencyKey: 'bad key' },
+    ],
+    [
+      'title too long',
+      {
+        ...base,
+        title: 'x'.repeat(101),
+      },
+    ],
+    [
+      'description control character',
+      { ...base, description: 'a\u0000b' },
+    ],
     [
       'too many details',
-      { ...base, details: Array.from({ length: 11 }, () => ({ label: 'A', value: 'B' })) },
+      {
+        ...base,
+        details: Array.from({ length: 11 }, () => ({ label: 'A', value: 'B' })),
+      },
     ],
-    ['detail value too long', { ...base, details: [{ label: 'A', value: 'v'.repeat(161) }] }],
-    ['metadata too large', { ...base, metadata: { secret: `sensitive-${'x'.repeat(2048)}` } }],
-    ['Telegram escaped text too long', { ...base, description: '&'.repeat(1000) }],
-    ['unknown field', { ...base, executeUrl: 'https://example.invalid/action' }],
+    [
+      'detail value too long',
+      {
+        ...base,
+        details: [
+          {
+            label: 'A',
+            value: 'v'.repeat(161),
+          },
+        ],
+      },
+    ],
+    [
+      'metadata too large',
+      {
+        ...base,
+        metadata: { secret: `sensitive-${'x'.repeat(2048)}` },
+      },
+    ],
+    [
+      'Telegram escaped text too long',
+      {
+        ...base,
+        description: '&'.repeat(1000),
+      },
+    ],
+    [
+      'unknown field',
+      { ...base, executeUrl: 'https://example.invalid/action' },
+    ],
   ];
   for (const [name, body] of badBodies) {
     const response = await app.inject({
@@ -282,7 +422,10 @@ test('API validates the full request boundary and never echoes rejected values',
     method: 'POST',
     url: '/v1/requests',
     headers,
-    payload: { ...base, description: 'x'.repeat(13_000) },
+    payload: {
+      ...base,
+      description: 'x'.repeat(13_000),
+    },
   });
   assert.equal(tooBig.statusCode, 413);
   assert.equal(tooBig.json().error.code, 'invalid_input');
@@ -309,7 +452,12 @@ test('API validates the full request boundary and never echoes rejected values',
 test('all v1 routes require a valid key while health stays public', async () => {
   const { core } = setup();
   const id = core.create('primary', input()).request.id;
-  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
+  const app = createHttpServer(core, new Map([
+    [
+      'primary',
+      'a'.repeat(32),
+    ],
+  ]), () => true);
   const routes: Array<['GET' | 'POST', string]> = [
     ['POST', '/v1/requests'],
     ['GET', '/v1/requests'],
@@ -328,7 +476,11 @@ test('all v1 routes require a valid key while health stays public', async () => 
       const response = await app.inject({
         method,
         url,
-        ...(authorization ? { headers: { authorization } } : {}),
+        ...(authorization
+          ? {
+              headers: { authorization },
+            }
+          : {}),
       });
       assert.equal(response.statusCode, 401, `${method} ${url}`);
       assert.deepEqual(response.json(), {
@@ -344,8 +496,14 @@ test('all v1 routes require a valid key while health stays public', async () => 
 test('scoped client keys are least privilege, owner scoped, revocable, and survive restart without storing secrets', async () => {
   const { db, path, core, clock } = setup();
   const keys = new Map([
-    ['primary', 'a'.repeat(32)],
-    ['secondary', 'b'.repeat(32)],
+    [
+      'primary',
+      'a'.repeat(32),
+    ],
+    [
+      'secondary',
+      'b'.repeat(32),
+    ],
   ]);
   const app = createHttpServer(core, keys, () => true);
   const primary = { authorization: `Bearer ${keys.get('primary')}` };
@@ -357,7 +515,10 @@ test('scoped client keys are least privilege, owner scoped, revocable, and survi
       headers: { ...headers, 'content-type': 'application/json' },
       payload: JSON.stringify(body),
     });
-  const created = await issue({ label: 'Worker', scopes: ['requests:create', 'requests:read'] });
+  const created = await issue({
+    label: 'Worker',
+    scopes: ['requests:create', 'requests:read'],
+  });
   assert.equal(created.statusCode, 201);
   const issued = created.json() as { id: string; key: string; clientId: string; scopes: string[] };
   assert.equal(issued.clientId, 'primary');
@@ -402,7 +563,12 @@ test('scoped client keys are least privilege, owner scoped, revocable, and survi
     `/v1/requests/${request.id}/claim`,
     `/v1/requests/${request.id}/result`,
   ]) {
-    const denied = await app.inject({ method: 'POST', url, headers: scoped, payload: {} });
+    const denied = await app.inject({
+      method: 'POST',
+      url,
+      headers: scoped,
+      payload: {},
+    });
     assert.equal(denied.statusCode, 403, url);
     assert.equal(denied.json().error.code, 'insufficient_scope');
   }
@@ -411,7 +577,10 @@ test('scoped client keys are least privilege, owner scoped, revocable, and survi
     403,
   );
   assert.equal(
-    (await issue({ label: 'Escalation', scopes: ['requests:claim'] }, scoped)).statusCode,
+    (await issue({
+      label: 'Escalation',
+      scopes: ['requests:claim'],
+    }, scoped)).statusCode,
     403,
   );
   assert.equal(
@@ -441,7 +610,10 @@ test('scoped client keys are least privilege, owner scoped, revocable, and survi
       .length,
     0,
   );
-  const readOnly = (await issue({ label: 'Observer', scopes: ['requests:read'] })).json();
+  const readOnly = (await issue({
+    label: 'Observer',
+    scopes: ['requests:read'],
+  })).json();
   const listed = (
     await app.inject({ method: 'GET', url: '/v1/client-keys?limit=1', headers: primary })
   ).json();
@@ -509,7 +681,12 @@ test('scoped client keys are least privilege, owner scoped, revocable, and survi
   dbs.push(reopened);
   const restarted = createHttpServer(
     new GatewayCore(reopened, clock),
-    new Map([['primary', 'c'.repeat(32)]]),
+    new Map([
+      [
+        'primary',
+        'c'.repeat(32),
+      ],
+    ]),
     () => true,
   );
   assert.equal(
@@ -539,7 +716,12 @@ test('scoped client keys are least privilege, owner scoped, revocable, and survi
   await restarted.close();
   const removed = createHttpServer(
     new GatewayCore(reopened, clock),
-    new Map([['secondary', keys.get('secondary')!]]),
+    new Map([
+      [
+        'secondary',
+        keys.get('secondary')!,
+      ],
+    ]),
     () => true,
   );
   assert.equal(
@@ -557,7 +739,12 @@ test('scoped client keys are least privilege, owner scoped, revocable, and survi
 
 test('every issued-key request scope authorizes only its intended operation', async () => {
   const { core } = setup();
-  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
+  const app = createHttpServer(core, new Map([
+    [
+      'primary',
+      'a'.repeat(32),
+    ],
+  ]), () => true);
   const bootstrap = { authorization: `Bearer ${'a'.repeat(32)}` };
   const issue = async (
     scope:
@@ -571,7 +758,10 @@ test('every issued-key request scope authorizes only its intended operation', as
       method: 'POST',
       url: '/v1/client-keys',
       headers: bootstrap,
-      payload: { label: scope, scopes: [scope] },
+      payload: {
+        label: scope,
+        scopes: [scope],
+      },
     });
     assert.equal(response.statusCode, 201);
     return { authorization: `Bearer ${response.json().key as string}` };
@@ -653,20 +843,60 @@ test('every issued-key request scope authorizes only its intended operation', as
 
 test('client key creation validates labels, scopes, expiry, and cursor without echoing submitted secrets', async () => {
   const { core, clock } = setup();
-  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
+  const app = createHttpServer(core, new Map([
+    [
+      'primary',
+      'a'.repeat(32),
+    ],
+  ]), () => true);
   const headers = { authorization: `Bearer ${'a'.repeat(32)}` };
   for (const body of [
-    { label: '', scopes: ['requests:read'] },
-    { label: 'x'.repeat(81), scopes: ['requests:read'] },
-    { label: 'bad\nlabel', scopes: ['requests:read'] },
+    {
+      label: '',
+      scopes: ['requests:read'],
+    },
+    {
+      label: 'x'.repeat(81),
+      scopes: ['requests:read'],
+    },
+    {
+      label: 'bad\nlabel',
+      scopes: ['requests:read'],
+    },
     { label: 'Bad', scopes: [] },
-    { label: 'Bad', scopes: ['requests:read', 'requests:read'] },
-    { label: 'Bad', scopes: ['keys:manage'] },
-    { label: 'Bad', scopes: ['requests:read'], clientId: 'secondary' },
-    { label: 'Bad', scopes: ['requests:read'], expiresAt: clock().toISOString() },
-    { label: 'Bad', scopes: ['requests:read'], expiresAt: '2026-02-30T12:00:00.000Z' },
-    { label: 'Bad', scopes: ['requests:read'], expiresAt: '2026-09-24T14:00:00+02:00' },
-    { label: 'Bad', scopes: ['requests:read'], expiresAt: '2026-09-24T12:01:00.0001Z' },
+    {
+      label: 'Bad',
+      scopes: ['requests:read', 'requests:read'],
+    },
+    {
+      label: 'Bad',
+      scopes: ['keys:manage'],
+    },
+    {
+      label: 'Bad',
+      scopes: ['requests:read'],
+      clientId: 'secondary',
+    },
+    {
+      label: 'Bad',
+      scopes: ['requests:read'],
+      expiresAt: clock().toISOString(),
+    },
+    {
+      label: 'Bad',
+      scopes: ['requests:read'],
+      expiresAt: '2026-02-30T12:00:00.000Z',
+    },
+    {
+      label: 'Bad',
+      scopes: ['requests:read'],
+      expiresAt: '2026-09-24T14:00:00+02:00',
+    },
+    {
+      label: 'Bad',
+      scopes: ['requests:read'],
+      expiresAt: '2026-09-24T12:01:00.0001Z',
+    },
   ]) {
     const response = await app.inject({
       method: 'POST',
@@ -677,7 +907,12 @@ test('client key creation validates labels, scopes, expiry, and cursor without e
     assert.equal(response.statusCode, 400);
     assert.equal(response.json().error.code, 'invalid_input');
   }
-  for (const query of ['limit=0', 'limit=101', 'cursor=broken', 'extra=value']) {
+  for (const query of [
+    'limit=0',
+    'limit=101',
+    'cursor=broken',
+    'extra=value',
+  ]) {
     assert.equal(
       (await app.inject({ method: 'GET', url: `/v1/client-keys?${query}`, headers })).statusCode,
       400,
@@ -704,8 +939,14 @@ test('client key creation validates labels, scopes, expiry, and cursor without e
 test('issued-key expiry and audit attribute successful actions without storing credentials', async () => {
   const { core, db, advance, clock, path } = setup();
   const keys = new Map([
-    ['primary', 'a'.repeat(32)],
-    ['secondary', 'b'.repeat(32)],
+    [
+      'primary',
+      'a'.repeat(32),
+    ],
+    [
+      'secondary',
+      'b'.repeat(32),
+    ],
   ]);
   const app = createHttpServer(core, keys, () => true);
   const bootstrap = { authorization: `Bearer ${keys.get('primary')}` };
@@ -790,11 +1031,23 @@ test('issued-key expiry and audit attribute successful actions without storing c
   ).json();
   assert.deepEqual(
     audit.items.map((event: { type: string }) => event.type),
-    ['key.revoked', 'execution.succeeded', 'execution.claimed', 'request.created', 'key.issued'],
+    [
+      'key.revoked',
+      'execution.succeeded',
+      'execution.claimed',
+      'request.created',
+      'key.issued',
+    ],
   );
   assert.deepEqual(
     audit.items.map((event: { actorKeyId: string | null }) => event.actorKeyId),
-    [null, issued.id, issued.id, issued.id, null],
+    [
+      null,
+      issued.id,
+      issued.id,
+      issued.id,
+      null,
+    ],
   );
   assert.equal(audit.items[0].subjectKeyId, issued.id);
   assert.equal(audit.items[4].subjectKeyId, issued.id);
@@ -939,8 +1192,14 @@ test('listing is owner scoped, filtered, ordered, paginated, and reflects expiry
   const app = createHttpServer(
     core,
     new Map([
-      ['primary', 'a'.repeat(32)],
-      ['secondary', 'b'.repeat(32)],
+      [
+        'primary',
+        'a'.repeat(32),
+      ],
+      [
+        'secondary',
+        'b'.repeat(32),
+      ],
     ]),
     () => true,
   );
@@ -1013,15 +1272,25 @@ test('attention filters find unresolved delivery failures, old claims, and pendi
   const app = createHttpServer(
     core,
     new Map([
-      ['primary', 'a'.repeat(32)],
-      ['secondary', 'b'.repeat(32)],
+      [
+        'primary',
+        'a'.repeat(32),
+      ],
+      [
+        'secondary',
+        'b'.repeat(32),
+      ],
     ]),
     () => true,
   );
   const primary = { authorization: `Bearer ${'a'.repeat(32)}` };
   const reader = core.issueClientKey('primary', 'Monitor', ['requests:read']);
   const read = async (query: string, authorization = primary.authorization) =>
-    app.inject({ method: 'GET', url: `/v1/requests?${query}`, headers: { authorization } });
+    app.inject({
+      method: 'GET',
+      url: `/v1/requests?${query}`,
+      headers: { authorization },
+    });
   const ids = (page: { items: Array<{ id: string }> }) => page.items.map(item => item.id);
 
   const failed = core.create('primary', input('attention:delivery')).request;
@@ -1148,8 +1417,14 @@ test('timeline API is owner scoped and paginated; expiry, cancellation, rejectio
   const app = createHttpServer(
     core,
     new Map([
-      ['primary', 'a'.repeat(32)],
-      ['secondary', 'b'.repeat(32)],
+      [
+        'primary',
+        'a'.repeat(32),
+      ],
+      [
+        'secondary',
+        'b'.repeat(32),
+      ],
     ]),
     () => true,
   );
@@ -1276,7 +1551,12 @@ test('an audit write failure rolls back key issuance and request creation', () =
 
 test('HTTP state errors, cancellation, and result token checks have stable responses', async () => {
   const { core } = setup();
-  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
+  const app = createHttpServer(core, new Map([
+    [
+      'primary',
+      'a'.repeat(32),
+    ],
+  ]), () => true);
   const headers = { authorization: `Bearer ${'a'.repeat(32)}` };
   const created = await app.inject({
     method: 'POST',
@@ -1298,7 +1578,12 @@ test('HTTP state errors, cancellation, and result token checks have stable respo
   );
   assert.equal(
     (
-      await app.inject({ method: 'POST', url: `/v1/requests/${id}/claim`, headers, payload: {} })
+      await app.inject({
+        method: 'POST',
+        url: `/v1/requests/${id}/claim`,
+        headers,
+        payload: {},
+      })
     ).json().error.code,
     'not_claimable',
   );
@@ -1319,7 +1604,11 @@ test('HTTP state errors, cancellation, and result token checks have stable respo
         method: 'POST',
         url: `/v1/requests/${id}/result`,
         headers,
-        payload: { claimToken: 'x'.repeat(43), status: 'succeeded', summary: 'done' },
+        payload: {
+          claimToken: 'x'.repeat(43),
+          status: 'succeeded',
+          summary: 'done',
+        },
       })
     ).json().error.code,
     'invalid_claim_token',
@@ -1333,13 +1622,23 @@ test('HTTP state errors, cancellation, and result token checks have stable respo
   assert.equal(cancelled.json().status, 'cancelled');
   assert.equal(
     (
-      await app.inject({ method: 'POST', url: `/v1/requests/${id}/cancel`, headers, payload: {} })
+      await app.inject({
+        method: 'POST',
+        url: `/v1/requests/${id}/cancel`,
+        headers,
+        payload: {},
+      })
     ).json().error.code,
     'invalid_state',
   );
   assert.equal(
     (
-      await app.inject({ method: 'POST', url: `/v1/requests/${id}/claim`, headers, payload: {} })
+      await app.inject({
+        method: 'POST',
+        url: `/v1/requests/${id}/claim`,
+        headers,
+        payload: {},
+      })
     ).json().error.code,
     'not_claimable',
   );
@@ -1520,7 +1819,11 @@ test('malformed and unknown Telegram callbacks leave the request pending', async
   await gateway.process({ update_id: 1 });
   await gateway.process({
     update_id: 2,
-    callback_query: { id: 'missing-message', data: `a:${job.callbackRef}`, from: { id: 7 } },
+    callback_query: {
+      id: 'missing-message',
+      data: `a:${job.callbackRef}`,
+      from: { id: 7 },
+    },
   });
   await gateway.process({
     update_id: 3,
@@ -1528,7 +1831,10 @@ test('malformed and unknown Telegram callbacks leave the request pending', async
       id: 'malformed',
       data: 'a:payload-and-secrets',
       from: { id: 7 },
-      message: { message_id: 101, chat: { id: -100 } },
+      message: {
+        message_id: 101,
+        chat: { id: -100 },
+      },
     },
   });
   await gateway.process({
@@ -1537,7 +1843,10 @@ test('malformed and unknown Telegram callbacks leave the request pending', async
       id: 'unknown-ref',
       data: `a:${'z'.repeat(16)}`,
       from: { id: 7 },
-      message: { message_id: 101, chat: { id: -100 } },
+      message: {
+        message_id: 101,
+        chat: { id: -100 },
+      },
     },
   });
   assert.equal(core.get('primary', request.id).status, 'pending');
@@ -1601,8 +1910,13 @@ test('out-of-order Telegram updates settle once and persist offset across restar
     },
     async poll(offset, signal) {
       offsets.push(offset);
-      if (pollCount++ === 0)
-        return [button(job, 4, 'r'), button(job, 3), button(job, 3)];
+      if (pollCount++ === 0) {
+        return [
+          button(job, 4, 'r'),
+          button(job, 3),
+          button(job, 3),
+        ];
+      }
       return new Promise<Update[]>((_resolve, reject) =>
         signal.addEventListener('abort', () => reject(new DOMException('stopped', 'AbortError')), {
           once: true,
@@ -1646,7 +1960,12 @@ test('out-of-order Telegram updates settle once and persist offset across restar
 
 test('client methods complete a failed execution and preserve API errors', async () => {
   const { core } = setup();
-  const app = createHttpServer(core, new Map([['primary', 'a'.repeat(32)]]), () => true);
+  const app = createHttpServer(core, new Map([
+    [
+      'primary',
+      'a'.repeat(32),
+    ],
+  ]), () => true);
   const client = new ApprovalClient({
     baseUrl: 'http://local',
     apiKey: 'a'.repeat(32),
@@ -1733,7 +2052,10 @@ test('client methods complete a failed execution and preserve API errors', async
     expiresInSeconds: 60,
   });
   assert.equal((await client.cancel(cancellable.id)).status, 'cancelled');
-  const issued = await client.createClientKey({ label: 'SDK reader', scopes: ['requests:read'] });
+  const issued = await client.createClientKey({
+    label: 'SDK reader',
+    scopes: ['requests:read'],
+  });
   const reader = new ApprovalClient({
     baseUrl: 'http://local',
     apiKey: issued.key,
@@ -1766,8 +2088,14 @@ test('client methods complete a failed execution and preserve API errors', async
 test('two clients share one gateway without sharing requests or idempotency keys', async () => {
   const { core, db, path, clock } = setup();
   const keys = new Map([
-    ['alpha', 'a'.repeat(32)],
-    ['beta', 'b'.repeat(32)],
+    [
+      'alpha',
+      'a'.repeat(32),
+    ],
+    [
+      'beta',
+      'b'.repeat(32),
+    ],
   ]);
   const app = createHttpServer(core, keys, () => true);
   const fetcher = mockFetch(app);
@@ -1853,8 +2181,14 @@ test('two clients share one gateway without sharing requests or idempotency keys
   const rotated = createHttpServer(
     afterRestart,
     new Map([
-      ['alpha', 'c'.repeat(32)],
-      ['beta', keys.get('beta')!],
+      [
+        'alpha',
+        'c'.repeat(32),
+      ],
+      [
+        'beta',
+        keys.get('beta')!,
+      ],
     ]),
     () => true,
   );
