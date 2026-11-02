@@ -59,7 +59,7 @@
     "verify": "npm run typecheck && npm test && npm run lint && npm run build && npm run console:build && npm run docs:build && npm run playground:build"
   },
   "dependencies": {
-    "@fastify/static": "^10.1.6",
+    "@fastify/static": "^10.1.8",
     "better-sqlite3": "13.0.3",
     "fastify": "^5.5.0",
     "zod": "^4.6.7"
